@@ -1,0 +1,306 @@
+# Quota Monitoring
+# 리소스 할당량 모니터링 및 알림
+
+---
+# 모니터링을 위한 ServiceAccount와 권한
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: quota-monitor
+  namespace: kube-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: quota-monitor
+rules:
+- apiGroups: [""]
+  resources: ["resourcequotas", "limitranges", "namespaces", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "statefulsets"]
+  verbs: ["get", "list"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: quota-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: quota-monitor
+subjects:
+- kind: ServiceAccount
+  name: quota-monitor
+  namespace: kube-system
+
+---
+# Quota 모니터링 Dashboard Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: quota-monitor
+  namespace: kube-system
+  labels:
+    app: quota-monitor
+spec:
+  serviceAccountName: quota-monitor
+  containers:
+  - name: monitor
+    image: bitnami/kubectl:latest
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Resource Quota Monitor Started ==="
+        
+        # 색상 코드 정의
+        RED='\033[0;31m'
+        YELLOW='\033[0;33m'
+        GREEN='\033[0;32m'
+        NC='\033[0m' # No Color
+        
+        # 사용률 계산 함수
+        calculate_usage() {
+          used=$1
+          hard=$2
+          if [ -z "$hard" ] || [ "$hard" = "0" ]; then
+            echo "N/A"
+            return
+          fi
+          percentage=$(awk "BEGIN {printf \"%.1f\", ($used/$hard)*100}")
+          echo "$percentage%"
+        }
+        
+        # 색상 결정 함수
+        get_color() {
+          percentage=$1
+          if (( $(echo "$percentage >= 90" | bc -l) )); then
+            echo "$RED"
+          elif (( $(echo "$percentage >= 70" | bc -l) )); then
+            echo "$YELLOW"
+          else
+            echo "$GREEN"
+          fi
+        }
+        
+        # 모니터링 루프
+        while true; do
+          clear
+          echo "=== Resource Quota Status Report ==="
+          echo "Time: $(date)"
+          echo
+          
+          # 네임스페이스별 ResourceQuota 상태
+          for ns in production staging development team-alpha team-beta ci-cd; do
+            echo "=== Namespace: $ns ==="
+            
+            quota=$(kubectl get resourcequota -n $ns -o json 2>/dev/null)
+            if [ -z "$quota" ] || [ "$(echo $quota | jq '.items | length')" -eq 0 ]; then
+              echo "No ResourceQuota found"
+              echo
+              continue
+            fi
+            
+            # CPU requests
+            cpu_used=$(echo $quota | jq -r '.items[0].status.used."requests.cpu" // "0"' | sed 's/m$//' | awk '{print $1/1000}')
+            cpu_hard=$(echo $quota | jq -r '.items[0].status.hard."requests.cpu" // "0"' | sed 's/m$//' | awk '{print $1/1000}')
+            cpu_percentage=$(calculate_usage $cpu_used $cpu_hard)
+            
+            # Memory requests
+            mem_used=$(echo $quota | jq -r '.items[0].status.used."requests.memory" // "0"' | sed 's/Gi$//' | sed 's/Mi$//' | awk '{if ($0 ~ /Mi$/) print $1/1024; else print $1}')
+            mem_hard=$(echo $quota | jq -r '.items[0].status.hard."requests.memory" // "0"' | sed 's/Gi$//')
+            mem_percentage=$(calculate_usage $mem_used $mem_hard)
+            
+            # Pods
+            pods_used=$(echo $quota | jq -r '.items[0].status.used.pods // "0"')
+            pods_hard=$(echo $quota | jq -r '.items[0].status.hard.pods // "0"')
+            pods_percentage=$(calculate_usage $pods_used $pods_hard)
+            
+            # Storage
+            storage_used=$(echo $quota | jq -r '.items[0].status.used."requests.storage" // "0"' | sed 's/Gi$//' | sed 's/Ti$//' | awk '{if ($0 ~ /Ti$/) print $1*1024; else print $1}')
+            storage_hard=$(echo $quota | jq -r '.items[0].status.hard."requests.storage" // "0"' | sed 's/Gi$//' | sed 's/Ti$//' | awk '{if ($0 ~ /Ti$/) print $1*1024; else print $1}')
+            storage_percentage=$(calculate_usage $storage_used $storage_hard)
+            
+            # 출력
+            printf "CPU Requests:     %s / %s cores (%s)\n" "$cpu_used" "$cpu_hard" "$cpu_percentage"
+            printf "Memory Requests:  %s / %s Gi (%s)\n" "$mem_used" "$mem_hard" "$mem_percentage"
+            printf "Pods:             %s / %s (%s)\n" "$pods_used" "$pods_hard" "$pods_percentage"
+            printf "Storage:          %s / %s Gi (%s)\n" "$storage_used" "$storage_hard" "$storage_percentage"
+            echo
+          done
+          
+          # 경고 및 알림
+          echo "=== Warnings ==="
+          kubectl get resourcequotas --all-namespaces -o json | \
+            jq -r '.items[] | 
+              select(.status.used != null and .status.hard != null) |
+              {
+                namespace: .metadata.namespace,
+                resource: (.status.used | to_entries[] | 
+                  select(.value != "0" and .value != 0) |
+                  {
+                    name: .key,
+                    used: .value,
+                    hard: (.key as $k | .[[.status.hard | to_entries[] | select(.key == $k)][0].value // "0"])
+                  }
+                )
+              } |
+              select(.resource.hard != "0" and .resource.hard != 0) |
+              {
+                namespace,
+                resource: .resource.name,
+                percentage: ((.resource.used | tonumber) / (.resource.hard | tonumber) * 100)
+              } |
+              select(.percentage >= 80) |
+              "\(.namespace): \(.resource) is at \(.percentage | floor)% capacity"'
+          
+          sleep 60
+        done
+    
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "100m"
+        memory: "256Mi"
+
+---
+# 할당량 사용률 알림을 위한 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quota-alerts
+  namespace: kube-system
+data:
+  alert-rules.yaml: |
+    alerts:
+      - name: HighCPUQuotaUsage
+        threshold: 90
+        resource: requests.cpu
+        action: notify-slack
+        
+      - name: HighMemoryQuotaUsage
+        threshold: 90
+        resource: requests.memory
+        action: notify-slack
+        
+      - name: HighPodCount
+        threshold: 95
+        resource: pods
+        action: notify-critical
+        
+      - name: StorageQuotaNearLimit
+        threshold: 85
+        resource: requests.storage
+        action: notify-email
+
+---
+# 리소스 사용 현황 리포트 생성 CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: quota-report-generator
+  namespace: kube-system
+spec:
+  schedule: "0 8 * * *"  # 매일 오전 8시
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: quota-monitor
+          containers:
+          - name: reporter
+            image: bitnami/kubectl:latest
+            command: ["sh", "-c"]
+            args:
+              - |
+                echo "=== Daily Resource Quota Report ==="
+                echo "Generated at: $(date)"
+                echo
+                
+                # CSV 헤더
+                echo "Namespace,Resource,Used,Hard,Percentage"
+                
+                # 데이터 수집
+                kubectl get resourcequotas --all-namespaces -o json | \
+                  jq -r '.items[] | 
+                    .metadata.namespace as $ns |
+                    .status.used as $used |
+                    .status.hard as $hard |
+                    ($used | to_entries[]) as $u |
+                    ($hard[.key] // "0") as $h |
+                    "\($ns),\($u.key),\($u.value),\($h),\((($u.value | tonumber) / ($h | tonumber) * 100) | floor)"'
+                
+                echo
+                echo "=== Top Resource Consumers ==="
+                
+                # CPU 상위 사용자
+                echo -e "\nTop CPU Consumers:"
+                kubectl top pods --all-namespaces --sort-by=cpu | head -10
+                
+                # Memory 상위 사용자
+                echo -e "\nTop Memory Consumers:"
+                kubectl top pods --all-namespaces --sort-by=memory | head -10
+                
+          restartPolicy: OnFailure
+
+---
+# 실시간 할당량 모니터링을 위한 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quota-dashboard
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quota-dashboard
+  template:
+    metadata:
+      labels:
+        app: quota-dashboard
+    spec:
+      serviceAccountName: quota-monitor
+      containers:
+      - name: dashboard
+        image: kubernetesui/dashboard:v2.7.0
+        ports:
+        - containerPort: 9090
+          name: http
+        args:
+          - --namespace=kube-system
+          - --enable-skip-login
+          - --disable-settings-authorizer
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "200m"
+            memory: "512Mi"
+
+---
+# Dashboard Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: quota-dashboard
+  namespace: kube-system
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 9090
+    protocol: TCP
+  selector:
+    app: quota-dashboard

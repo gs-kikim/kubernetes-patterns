@@ -1,0 +1,278 @@
+# Namespace Setup
+# 환경별 네임스페이스 구성
+
+---
+# Production 네임스페이스
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    environment: production
+    cost-center: engineering
+    team: platform
+  annotations:
+    description: "Production workloads with strict resource controls"
+    contact: "platform-team@example.com"
+
+---
+# Staging 네임스페이스
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    environment: staging
+    cost-center: engineering
+    team: platform
+  annotations:
+    description: "Staging environment for pre-production testing"
+    contact: "platform-team@example.com"
+
+---
+# Development 네임스페이스
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: development
+  labels:
+    environment: development
+    cost-center: engineering
+    team: developers
+  annotations:
+    description: "Development environment for feature development"
+    contact: "dev-team@example.com"
+
+---
+# Team-specific 네임스페이스들
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-alpha
+  labels:
+    team: alpha
+    project: microservices
+    budget-code: "ALPHA-2024"
+  annotations:
+    description: "Team Alpha's dedicated namespace"
+    slack-channel: "#team-alpha"
+    cost-limit: "1000"  # 월간 비용 한도
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-beta
+  labels:
+    team: beta
+    project: data-pipeline
+    budget-code: "BETA-2024"
+  annotations:
+    description: "Team Beta's dedicated namespace"
+    slack-channel: "#team-beta"
+    cost-limit: "1500"
+
+---
+# CI/CD 네임스페이스
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci-cd
+  labels:
+    purpose: automation
+    environment: ci-cd
+  annotations:
+    description: "CI/CD pipelines and build jobs"
+    auto-cleanup: "true"  # 자동 정리 활성화
+
+---
+# 네임스페이스별 기본 ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: production
+  annotations:
+    description: "Default service account for production pods"
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: staging
+  annotations:
+    description: "Default service account for staging pods"
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: development
+  annotations:
+    description: "Default service account for development pods"
+
+---
+# 네임스페이스별 NetworkPolicy (격리)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-ingress
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+# Production 네임스페이스 내부 통신만 허용
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector: {}  # 같은 네임스페이스의 Pod만
+
+---
+# 네임스페이스 기본 설정 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: namespace-defaults
+  namespace: production
+data:
+  log.level: "WARN"
+  monitoring.enabled: "true"
+  tracing.enabled: "true"
+  backup.enabled: "true"
+  backup.schedule: "0 2 * * *"  # 매일 새벽 2시
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: namespace-defaults
+  namespace: staging
+data:
+  log.level: "INFO"
+  monitoring.enabled: "true"
+  tracing.enabled: "true"
+  backup.enabled: "false"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: namespace-defaults
+  namespace: development
+data:
+  log.level: "DEBUG"
+  monitoring.enabled: "false"
+  tracing.enabled: "false"
+  backup.enabled: "false"
+
+---
+# 네임스페이스별 기본 Labels 적용을 위한 MutatingWebhook 설정
+# (실제 환경에서는 admission webhook controller 필요)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: namespace-labels-policy
+  namespace: kube-system
+data:
+  policy.yaml: |
+    namespaces:
+      production:
+        defaultLabels:
+          tier: "production"
+          compliance: "required"
+          backup: "enabled"
+      staging:
+        defaultLabels:
+          tier: "staging"
+          compliance: "optional"
+          backup: "disabled"
+      development:
+        defaultLabels:
+          tier: "development"
+          compliance: "none"
+          backup: "disabled"
+
+---
+# 네임스페이스 자동 정리를 위한 CronJob (CI/CD 네임스페이스)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: namespace-cleanup
+  namespace: ci-cd
+spec:
+  schedule: "0 0 * * *"  # 매일 자정
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: namespace-cleaner
+          containers:
+          - name: cleanup
+            image: bitnami/kubectl:latest
+            command:
+            - sh
+            - -c
+            - |
+              echo "Cleaning up old resources in CI/CD namespace..."
+              
+              # 7일 이상 된 완료된 Job 삭제
+              kubectl delete jobs --field-selector status.successful=1 \
+                -n ci-cd \
+                --all
+              
+              # 실패한 Pod 삭제
+              kubectl delete pods --field-selector=status.phase=Failed \
+                -n ci-cd
+              
+              echo "Cleanup completed"
+          restartPolicy: OnFailure
+
+---
+# Cleanup용 ServiceAccount와 권한
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: namespace-cleaner
+  namespace: ci-cd
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: namespace-cleaner
+  namespace: ci-cd
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["list", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: namespace-cleaner
+  namespace: ci-cd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: namespace-cleaner
+subjects:
+- kind: ServiceAccount
+  name: namespace-cleaner
+  namespace: ci-cd

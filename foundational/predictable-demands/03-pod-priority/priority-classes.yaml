@@ -1,0 +1,110 @@
+# Priority Classes 정의
+# 다양한 우선순위 클래스 설정
+
+---
+# 시스템 크리티컬 우선순위 (최고)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: system-critical
+value: 2000000000
+globalDefault: false
+description: "Used for system critical pods that must not be evicted"
+
+---
+# 클러스터 크리티컬 우선순위
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: cluster-critical
+value: 1000000000
+globalDefault: false
+description: "Used for cluster critical components"
+
+---
+# 프로덕션 높은 우선순위
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: production-high
+value: 10000
+globalDefault: false
+description: "High priority production workloads"
+preemptionPolicy: PreemptLowerPriority  # 낮은 우선순위 Pod 선점 가능
+
+---
+# 프로덕션 일반 우선순위
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: production-normal
+value: 5000
+globalDefault: false
+description: "Normal priority production workloads"
+preemptionPolicy: PreemptLowerPriority
+
+---
+# 프로덕션 낮은 우선순위
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: production-low
+value: 1000
+globalDefault: false
+description: "Low priority production workloads"
+preemptionPolicy: PreemptLowerPriority
+
+---
+# 개발 환경 우선순위
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: development
+value: 500
+globalDefault: false
+description: "Development and testing workloads"
+preemptionPolicy: PreemptLowerPriority
+
+---
+# 배치 작업 우선순위
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: batch-jobs
+value: 100
+globalDefault: false
+description: "Batch processing jobs"
+preemptionPolicy: PreemptLowerPriority
+
+---
+# 기본 우선순위 (글로벌 기본값)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: default-priority
+value: 200
+globalDefault: true  # 이것이 기본값이 됨
+description: "Default priority for pods without explicit priority class"
+preemptionPolicy: PreemptLowerPriority
+
+---
+# 선점 불가능한 우선순위 클래스
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: no-preemption
+value: 700
+globalDefault: false
+description: "Pods that should not preempt others"
+preemptionPolicy: Never  # 다른 Pod을 선점하지 않음
+
+---
+# 실험적 워크로드 (최저 우선순위)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: experimental
+value: 10
+globalDefault: false
+description: "Experimental workloads that can be evicted anytime"
+preemptionPolicy: PreemptLowerPriority

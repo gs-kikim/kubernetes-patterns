@@ -1,0 +1,286 @@
+# Resource Limits 예제
+# CPU와 메모리 리소스 제한의 동작 확인
+
+---
+# CPU 리소스 제한 테스트
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cpu-limit-test
+  labels:
+    test: cpu-limits
+spec:
+  containers:
+  - name: cpu-stress
+    image: polinux/stress
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== CPU Limit Test ==="
+        echo "Requested: 100m, Limit: 200m"
+        echo "Starting CPU stress with 2 workers..."
+        
+        # CPU 정보 출력
+        echo "CPU Info:"
+        cat /proc/cpuinfo | grep "processor" | wc -l
+        
+        # cgroup 제한 확인
+        echo -e "\nCGroup CPU Quota:"
+        cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us
+        cat /sys/fs/cgroup/cpu/cpu.cfs_period_us
+        
+        # CPU 스트레스 시작
+        stress --cpu 2 --timeout 300s --verbose
+    
+    resources:
+      requests:
+        cpu: "100m"      # 0.1 CPU
+        memory: "64Mi"
+      limits:
+        cpu: "200m"      # 0.2 CPU (throttling 발생)
+        memory: "128Mi"
+
+---
+# 메모리 리소스 제한 테스트
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-limit-test
+  labels:
+    test: memory-limits
+spec:
+  containers:
+  - name: memory-stress
+    image: polinux/stress
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Memory Limit Test ==="
+        echo "Requested: 64Mi, Limit: 128Mi"
+        
+        # 메모리 정보 출력
+        echo -e "\nMemory Info:"
+        free -m
+        
+        # cgroup 메모리 제한 확인
+        echo -e "\nCGroup Memory Limit:"
+        cat /sys/fs/cgroup/memory/memory.limit_in_bytes | awk '{print $1/1024/1024 " MB"}'
+        
+        echo -e "\nStarting memory allocation..."
+        # 점진적으로 메모리 할당 (OOM 테스트)
+        stress --vm 1 --vm-bytes 150M --timeout 60s --verbose
+    
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "100m"
+        memory: "128Mi"  # 150M 할당 시도하면 OOM
+
+---
+# CPU Throttling 모니터링
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cpu-throttle-monitor
+  labels:
+    test: cpu-throttle
+spec:
+  containers:
+  - name: app
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== CPU Throttling Monitor ==="
+        
+        # CPU 집약적인 작업 함수
+        cpu_burn() {
+          while true; do
+            echo "scale=5000; 4*a(1)" | bc -l > /dev/null
+          done
+        }
+        
+        # 백그라운드에서 CPU 작업 시작
+        cpu_burn &
+        PID=$!
+        
+        # Throttling 통계 모니터링
+        while true; do
+          echo -e "\n$(date)"
+          
+          # CPU 사용률
+          TOP_OUTPUT=$(top -bn1 -p $PID | tail -1)
+          echo "Process CPU Usage: $TOP_OUTPUT"
+          
+          # Throttling 통계
+          if [ -f /sys/fs/cgroup/cpu/cpu.stat ]; then
+            echo "Throttling Stats:"
+            cat /sys/fs/cgroup/cpu/cpu.stat | grep throttled
+          fi
+          
+          sleep 10
+        done
+    
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "32Mi"
+      limits:
+        cpu: "100m"     # 낮은 limit으로 throttling 유발
+        memory: "64Mi"
+
+---
+# 메모리 누수 시뮬레이션
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-leak-test
+  labels:
+    test: memory-leak
+spec:
+  containers:
+  - name: leak
+    image: python:3.9-slim
+    command: ["python", "-c"]
+    args:
+      - |
+        import time
+        import gc
+        
+        print("=== Memory Leak Simulation ===")
+        print("Limit: 256Mi")
+        
+        # 메모리 누수 시뮬레이션
+        leak_list = []
+        mb_allocated = 0
+        
+        try:
+            while True:
+                # 1MB씩 할당
+                data = 'x' * (1024 * 1024)
+                leak_list.append(data)
+                mb_allocated += 1
+                
+                print(f"Allocated: {mb_allocated} MB")
+                
+                # 메모리 사용량 출력
+                with open('/proc/self/status', 'r') as f:
+                    for line in f:
+                        if line.startswith('VmRSS'):
+                            print(f"Resident Memory: {line.strip()}")
+                            break
+                
+                time.sleep(1)
+                
+        except MemoryError:
+            print(f"MemoryError after allocating {mb_allocated} MB")
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "100m"
+        memory: "256Mi"  # OOM 발생 예상
+
+---
+# 리소스 사용량 실시간 모니터링
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-monitor
+  labels:
+    test: monitoring
+spec:
+  containers:
+  # 메인 애플리케이션
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+  
+  # 사이드카 - 리소스 모니터링
+  - name: monitor
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Resource Usage Monitor ==="
+        
+        while true; do
+          echo -e "\n$(date)"
+          
+          # CPU 사용률
+          echo "CPU Usage:"
+          top -bn1 | head -5
+          
+          # 메모리 사용률
+          echo -e "\nMemory Usage:"
+          free -m
+          
+          # cgroup 정보
+          if [ -d /sys/fs/cgroup ]; then
+            echo -e "\nCGroup Limits:"
+            echo -n "CPU Quota: "
+            cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || echo "N/A"
+            echo -n "Memory Limit: "
+            cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null | awk '{print $1/1024/1024 " MB"}' || echo "N/A"
+          fi
+          
+          sleep 30
+        done
+    
+    resources:
+      requests:
+        cpu: "10m"
+        memory: "32Mi"
+      limits:
+        cpu: "50m"
+        memory: "64Mi"
+
+---
+# CPU와 메모리 동시 스트레스 테스트
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: combined-stress-test
+spec:
+  template:
+    metadata:
+      labels:
+        test: combined-stress
+    spec:
+      containers:
+      - name: stress
+        image: polinux/stress
+        command: ["stress"]
+        args:
+          - "--cpu"
+          - "2"        # 2개의 CPU 워커
+          - "--vm"
+          - "2"        # 2개의 메모리 워커
+          - "--vm-bytes"
+          - "100M"     # 각 워커당 100MB
+          - "--timeout"
+          - "120s"     # 2분간 실행
+          - "--verbose"
+        
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"    # CPU throttling 예상
+            memory: "256Mi" # 총 200MB 사용 시 안전
+      
+      restartPolicy: Never
+  backoffLimit: 1

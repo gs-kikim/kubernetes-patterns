@@ -1,0 +1,292 @@
+# Limit Ranges
+# 개별 오브젝트에 대한 리소스 제한 설정
+
+---
+# Production 네임스페이스 - 엄격한 제한
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: production-limits
+  namespace: production
+spec:
+  limits:
+  # Container 레벨 제한
+  - type: Container
+    default:              # 기본값 (limits)
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:       # 기본 requests
+      cpu: "100m"
+      memory: "128Mi"
+    min:                  # 최소값
+      cpu: "100m"
+      memory: "128Mi"
+    max:                  # 최대값
+      cpu: "2"
+      memory: "2Gi"
+    maxLimitRequestRatio: # limit/request 비율 제한
+      cpu: "4"
+      memory: "2"
+      
+  # Pod 레벨 제한
+  - type: Pod
+    min:
+      cpu: "200m"
+      memory: "256Mi"
+    max:
+      cpu: "16"
+      memory: "32Gi"
+      
+  # PersistentVolumeClaim 제한
+  - type: PersistentVolumeClaim
+    min:
+      storage: "1Gi"
+    max:
+      storage: "100Gi"
+
+---
+# Staging 네임스페이스 - 중간 수준 제한
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: staging-limits
+  namespace: staging
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "1"
+      memory: "2Gi"
+    defaultRequest:
+      cpu: "250m"
+      memory: "512Mi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+    max:
+      cpu: "4"
+      memory: "8Gi"
+    maxLimitRequestRatio:
+      cpu: "4"
+      memory: "4"
+      
+  - type: Pod
+    max:
+      cpu: "8"
+      memory: "16Gi"
+      
+  - type: PersistentVolumeClaim
+    min:
+      storage: "500Mi"
+    max:
+      storage: "50Gi"
+
+---
+# Development 네임스페이스 - 느슨한 제한
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: development-limits
+  namespace: development
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "500m"
+      memory: "1Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+    min:
+      cpu: "10m"
+      memory: "32Mi"
+    max:
+      cpu: "2"
+      memory: "4Gi"
+    maxLimitRequestRatio:
+      cpu: "10"        # 개발환경은 버스트 허용
+      memory: "8"
+      
+  - type: Pod
+    max:
+      cpu: "4"
+      memory: "8Gi"
+      
+  - type: PersistentVolumeClaim
+    min:
+      storage: "100Mi"
+    max:
+      storage: "20Gi"
+
+---
+# Team Alpha - 마이크로서비스 중심
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: team-alpha-limits
+  namespace: team-alpha
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "250m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+    min:
+      cpu: "50m"
+      memory: "128Mi"
+    max:
+      cpu: "1"          # 작은 서비스들
+      memory: "2Gi"
+    maxLimitRequestRatio:
+      cpu: "3"
+      memory: "2"
+
+---
+# Team Beta - 데이터 처리 중심
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: team-beta-limits
+  namespace: team-beta
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "1"
+      memory: "4Gi"     # 데이터 처리를 위한 큰 메모리
+    defaultRequest:
+      cpu: "500m"
+      memory: "2Gi"
+    min:
+      cpu: "100m"
+      memory: "512Mi"
+    max:
+      cpu: "4"
+      memory: "16Gi"
+    maxLimitRequestRatio:
+      cpu: "2"
+      memory: "2"
+      
+  - type: PersistentVolumeClaim
+    min:
+      storage: "10Gi"   # 큰 데이터셋
+    max:
+      storage: "500Gi"
+
+---
+# CI/CD - 빌드 작업 최적화
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ci-cd-limits
+  namespace: ci-cd
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "2"
+      memory: "4Gi"
+      ephemeral-storage: "10Gi"
+    defaultRequest:
+      cpu: "500m"
+      memory: "1Gi"
+      ephemeral-storage: "5Gi"
+    min:
+      cpu: "100m"
+      memory: "256Mi"
+      ephemeral-storage: "1Gi"
+    max:
+      cpu: "4"
+      memory: "8Gi"
+      ephemeral-storage: "20Gi"
+    maxLimitRequestRatio:
+      cpu: "4"
+      memory: "4"
+      ephemeral-storage: "2"
+      
+  # Pod 레벨 - 멀티 컨테이너 빌드 지원
+  - type: Pod
+    max:
+      cpu: "8"
+      memory: "16Gi"
+      ephemeral-storage: "50Gi"
+
+---
+# Init Container 전용 제한 (Production)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: init-container-limits
+  namespace: production
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "500m"
+      memory: "1Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "256Mi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+    max:
+      cpu: "1"
+      memory: "2Gi"
+
+---
+# GPU 리소스 제한 (특수 워크로드)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: gpu-limits
+  namespace: team-beta
+spec:
+  limits:
+  - type: Container
+    max:
+      nvidia.com/gpu: "2"    # 최대 2개 GPU
+    min:
+      nvidia.com/gpu: "0"
+    default:
+      nvidia.com/gpu: "0"
+    defaultRequest:
+      nvidia.com/gpu: "0"
+
+---
+# 디버깅을 위한 LimitRange 정보 표시
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: limitrange-helper
+  namespace: kube-system
+data:
+  check-limits.sh: |
+    #!/bin/bash
+    # LimitRange 영향 확인 스크립트
+    
+    NAMESPACE=$1
+    
+    echo "=== LimitRange in namespace: $NAMESPACE ==="
+    kubectl describe limitrange -n $NAMESPACE
+    
+    echo -e "\n=== Example Pod with defaults ==="
+    cat <<EOF
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: test-pod
+      namespace: $NAMESPACE
+    spec:
+      containers:
+      - name: app
+        image: nginx
+        # No resources specified - will use defaults from LimitRange
+    EOF
+    
+    echo -e "\n=== What will be applied: ==="
+    kubectl -n $NAMESPACE get limitrange -o json | \
+      jq '.items[0].spec.limits[] | select(.type=="Container") | {default, defaultRequest}'

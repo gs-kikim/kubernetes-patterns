@@ -1,0 +1,284 @@
+# Priority Pods 예제
+# 다양한 우선순위를 가진 Pod들
+
+---
+# 시스템 크리티컬 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: system-critical-pod
+  namespace: kube-system  # 시스템 네임스페이스
+  labels:
+    priority: system-critical
+spec:
+  priorityClassName: system-critical
+  containers:
+  - name: critical-app
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "System critical pod started"
+        echo "Priority: system-critical (2000000000)"
+        echo "This pod should never be evicted"
+        while true; do
+          echo "$(date): Critical system process running..."
+          sleep 60
+        done
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "100m"
+        memory: "128Mi"
+
+---
+# 프로덕션 높은 우선순위 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: production-high-pod
+  labels:
+    priority: production-high
+    app: critical-service
+spec:
+  priorityClassName: production-high
+  containers:
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "1000m"
+        memory: "2Gi"
+    env:
+    - name: PRIORITY_INFO
+      value: "Production High Priority (10000)"
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+---
+# 프로덕션 일반 우선순위 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: production-normal-app
+  labels:
+    priority: production-normal
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: normal-app
+  template:
+    metadata:
+      labels:
+        app: normal-app
+        priority: production-normal
+    spec:
+      priorityClassName: production-normal
+      containers:
+      - name: app
+        image: nginx:1.20
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        env:
+        - name: PRIORITY_INFO
+          value: "Production Normal Priority (5000)"
+
+---
+# 개발 환경 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: development-pod
+  labels:
+    priority: development
+    environment: dev
+spec:
+  priorityClassName: development
+  containers:
+  - name: dev-app
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Development pod started"
+        echo "Priority: development (500)"
+        echo "Can be evicted by production workloads"
+        while true; do
+          echo "$(date): Dev process running..."
+          sleep 30
+        done
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+
+---
+# 배치 작업 Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-job-low-priority
+  labels:
+    priority: batch
+spec:
+  template:
+    metadata:
+      labels:
+        priority: batch
+        job-type: analytics
+    spec:
+      priorityClassName: batch-jobs
+      containers:
+      - name: batch-processor
+        image: busybox
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Batch job started"
+            echo "Priority: batch-jobs (100)"
+            echo "Processing data..."
+            
+            # 배치 작업 시뮬레이션
+            for i in $(seq 1 60); do
+              echo "Processing batch $i/60"
+              sleep 2
+            done
+            
+            echo "Batch job completed"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+      restartPolicy: Never
+  backoffLimit: 3
+
+---
+# 선점 불가능한 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-preemption-pod
+  labels:
+    priority: no-preemption
+spec:
+  priorityClassName: no-preemption
+  containers:
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+    env:
+    - name: PRIORITY_INFO
+      value: "No Preemption (700) - Cannot preempt others"
+
+---
+# 실험적 워크로드 (가장 먼저 evict됨)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: experimental-workload
+  labels:
+    priority: experimental
+spec:
+  replicas: 10  # 많은 수의 레플리카
+  selector:
+    matchLabels:
+      app: experimental
+  template:
+    metadata:
+      labels:
+        app: experimental
+        priority: experimental
+    spec:
+      priorityClassName: experimental
+      containers:
+      - name: experiment
+        image: busybox
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "Experimental pod started"
+            echo "Priority: experimental (10)"
+            echo "First to be evicted under pressure"
+            while true; do
+              echo "$(date): Experimental process..."
+              sleep 30
+            done
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+
+---
+# 우선순위 정보 표시 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: priority-info-pod
+  labels:
+    app: priority-info
+spec:
+  serviceAccountName: default
+  containers:
+  - name: info
+    image: nicolaka/netshoot
+    command: ["sh", "-c"]
+    args:
+      - |
+        # kubectl 설치
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+        
+        echo "=== Pod Priority Information ==="
+        
+        while true; do
+          echo -e "\n$(date)"
+          echo "Current Pod Priorities:"
+          
+          kubectl get pods --all-namespaces -o custom-columns=\
+        NAMESPACE:.metadata.namespace,\
+        NAME:.metadata.name,\
+        PRIORITY:.spec.priority,\
+        PRIORITY_CLASS:.spec.priorityClassName,\
+        STATUS:.status.phase \
+            --sort-by='.spec.priority' | head -20
+          
+          sleep 60
+        done
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "100m"
+        memory: "256Mi"

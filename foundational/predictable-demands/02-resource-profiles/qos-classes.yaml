@@ -1,0 +1,246 @@
+# QoS Classes 예제
+# Guaranteed, Burstable, Best-Effort 클래스 비교
+
+---
+# Guaranteed QoS Class
+# requests와 limits가 동일하고 모든 리소스에 대해 설정됨
+apiVersion: v1
+kind: Pod
+metadata:
+  name: guaranteed-pod
+  labels:
+    qos: guaranteed
+spec:
+  containers:
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"  # requests와 동일
+        cpu: "100m"     # requests와 동일
+    # 리소스 사용량 확인을 위한 명령어
+    command: ["/bin/sh"]
+    args:
+      - -c
+      - |
+        nginx -g 'daemon off;' &
+        while true; do
+          echo "$(date): CPU: $(top -bn1 | grep 'Cpu(s)' | awk '{print $2}')%, Memory: $(free -m | awk 'NR==2{printf "%.1f%%", $3*100/$2}')"
+          sleep 30
+        done
+
+---
+# Burstable QoS Class - 케이스 1
+# requests < limits
+apiVersion: v1
+kind: Pod
+metadata:
+  name: burstable-pod-1
+  labels:
+    qos: burstable
+    case: "requests-less-than-limits"
+spec:
+  containers:
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"  # requests의 2배
+        cpu: "200m"      # requests의 4배
+
+---
+# Burstable QoS Class - 케이스 2
+# 일부 리소스만 설정
+apiVersion: v1
+kind: Pod
+metadata:
+  name: burstable-pod-2
+  labels:
+    qos: burstable
+    case: "partial-resources"
+spec:
+  containers:
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        memory: "128Mi"
+        # CPU requests 없음
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+
+---
+# Burstable QoS Class - 케이스 3
+# requests만 설정 (limits 없음)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: burstable-pod-3
+  labels:
+    qos: burstable
+    case: "requests-only"
+spec:
+  containers:
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      # limits 없음 - 노드의 가용 리소스까지 사용 가능
+
+---
+# Best-Effort QoS Class
+# 리소스 설정 없음
+apiVersion: v1
+kind: Pod
+metadata:
+  name: best-effort-pod
+  labels:
+    qos: best-effort
+spec:
+  containers:
+  - name: app
+    image: nginx:1.20
+    # resources 섹션 없음
+
+---
+# Multi-container Pod의 QoS 결정
+# 모든 컨테이너가 Guaranteed 조건을 만족해야 Pod이 Guaranteed
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-guaranteed
+  labels:
+    qos: guaranteed
+    type: multi-container
+spec:
+  containers:
+  # 컨테이너 1 - Guaranteed 조건 만족
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+  
+  # 컨테이너 2 - Guaranteed 조건 만족
+  - name: sidecar
+    image: busybox
+    command: ["sleep", "3600"]
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "64Mi"
+        cpu: "50m"
+
+---
+# Multi-container Pod - Burstable
+# 하나라도 Burstable이면 전체 Pod이 Burstable
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-burstable
+  labels:
+    qos: burstable
+    type: multi-container
+spec:
+  containers:
+  # 컨테이너 1 - Guaranteed 조건 만족
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+  
+  # 컨테이너 2 - Burstable (requests < limits)
+  - name: sidecar
+    image: busybox
+    command: ["sleep", "3600"]
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "25m"
+      limits:
+        memory: "64Mi"   # Burstable 조건
+        cpu: "50m"
+
+---
+# Init Container가 있는 경우의 QoS
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-container-qos
+  labels:
+    qos: guaranteed
+    type: with-init
+spec:
+  initContainers:
+  # Init container도 QoS 계산에 포함됨
+  - name: init
+    image: busybox
+    command: ["sh", "-c", "echo 'Initializing...' && sleep 5"]
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "64Mi"
+        cpu: "50m"
+  
+  containers:
+  - name: app
+    image: nginx:1.20
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+---
+# QoS 비교를 위한 스트레스 테스트 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qos-stress-test
+  labels:
+    purpose: stress-test
+spec:
+  containers:
+  - name: stress
+    image: polinux/stress
+    command: ["stress"]
+    args:
+      - "--cpu"
+      - "1"
+      - "--vm"
+      - "1"
+      - "--vm-bytes"
+      - "150M"
+      - "--timeout"
+      - "60s"
+    resources:
+      requests:
+        memory: "100Mi"
+        cpu: "100m"
+      limits:
+        memory: "200Mi"
+        cpu: "200m"

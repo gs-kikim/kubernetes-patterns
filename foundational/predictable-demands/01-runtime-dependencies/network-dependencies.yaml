@@ -1,0 +1,331 @@
+# Network Dependencies 예제
+# 네트워크 의존성과 Service 접근 패턴
+
+---
+# Backend Service와 Deployment
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  labels:
+    app: backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: backend
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: hashicorp/http-echo:0.2.3
+        args:
+          - "-text=Backend service response"
+          - "-listen=:8080"
+        ports:
+        - containerPort: 8080
+          name: http
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+
+---
+# Frontend Pod with Service Discovery
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend-pod
+  labels:
+    app: frontend
+spec:
+  containers:
+  - name: frontend
+    image: nicolaka/netshoot
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Service Discovery Test ==="
+        
+        # DNS를 통한 서비스 발견
+        echo "1. DNS Resolution:"
+        nslookup backend-service
+        echo
+        
+        # 환경변수를 통한 서비스 발견
+        echo "2. Service Environment Variables:"
+        env | grep BACKEND_SERVICE
+        echo
+        
+        # 서비스 접근 테스트
+        echo "3. Service Access Test:"
+        while true; do
+          echo "$(date): Calling backend service..."
+          curl -s http://backend-service:8080 || echo "Failed to connect"
+          echo
+          sleep 30
+        done
+    
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+---
+# Headless Service 예제 (StatefulSet용)
+apiVersion: v1
+kind: Service
+metadata:
+  name: database-service
+  labels:
+    app: database
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: database
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+spec:
+  serviceName: database-service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:13-alpine
+        env:
+        - name: POSTGRES_PASSWORD
+          value: "testpassword"
+        - name: POSTGRES_DB
+          value: "testdb"
+        ports:
+        - containerPort: 5432
+          name: postgres
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+
+---
+# Service Discovery Test Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: service-discovery-test
+  labels:
+    app: test
+spec:
+  containers:
+  - name: test
+    image: nicolaka/netshoot
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Comprehensive Service Discovery Test ==="
+        
+        while true; do
+          echo "$(date): Starting service discovery tests..."
+          
+          # ClusterIP Service 테스트
+          echo -e "\n1. ClusterIP Service (backend-service):"
+          echo "   DNS A Record:"
+          dig +short backend-service.default.svc.cluster.local
+          echo "   Service Endpoints:"
+          nslookup backend-service | grep Address | tail -n +2
+          
+          # Headless Service 테스트
+          echo -e "\n2. Headless Service (database-service):"
+          echo "   Individual Pod DNS:"
+          for i in 0 1 2; do
+            echo -n "   database-$i: "
+            dig +short database-$i.database-service.default.svc.cluster.local
+          done
+          
+          # SRV 레코드 테스트
+          echo -e "\n3. SRV Records:"
+          dig +short SRV _postgres._tcp.database-service.default.svc.cluster.local
+          
+          # 연결 테스트
+          echo -e "\n4. Connectivity Tests:"
+          echo -n "   Backend Service: "
+          curl -s -m 2 http://backend-service:8080 && echo "OK" || echo "FAILED"
+          
+          echo -n "   Database Service: "
+          nc -zv -w 2 database-service 5432 2>&1 | grep -q succeeded && echo "OK" || echo "FAILED"
+          
+          echo -e "\n" + "="*50 + "\n"
+          sleep 60
+        done
+
+---
+# NodePort Service 예제
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-nodeport
+  labels:
+    app: web
+spec:
+  type: NodePort
+  ports:
+  - port: 80
+    targetPort: 80
+    nodePort: 30080  # 30000-32767 범위
+    protocol: TCP
+    name: http
+  selector:
+    app: web
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.20
+        ports:
+        - containerPort: 80
+          name: http
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+      
+      initContainers:
+      - name: init-html
+        image: busybox
+        command: ["sh", "-c"]
+        args:
+          - |
+            cat > /html/index.html <<EOF
+            <html>
+            <head><title>Network Dependencies Demo</title></head>
+            <body>
+            <h1>Kubernetes Network Dependencies</h1>
+            <p>Pod Name: $(hostname)</p>
+            <p>Pod IP: $(hostname -i)</p>
+            <p>Service Type: NodePort (30080)</p>
+            </body>
+            </html>
+            EOF
+        volumeMounts:
+        - name: html
+          mountPath: /html
+      
+      volumes:
+      - name: html
+        emptyDir: {}
+
+---
+# Pod with hostNetwork (특별한 경우에만 사용)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: host-network-pod
+  labels:
+    app: host-network
+spec:
+  hostNetwork: true  # 호스트 네트워크 사용
+  containers:
+  - name: network-tools
+    image: nicolaka/netshoot
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Host Network Mode ==="
+        echo "This pod is using the host's network namespace"
+        echo "Host IP addresses:"
+        ip addr show
+        echo
+        echo "Listening ports on host:"
+        netstat -tuln
+        
+        # 무한 대기
+        tail -f /dev/null
+    securityContext:
+      capabilities:
+        add: ["NET_ADMIN"]  # 네트워크 관리 권한
+
+---
+# Pod with hostPort (권장하지 않음, 예시용)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostport-pod
+  labels:
+    app: hostport
+spec:
+  containers:
+  - name: web
+    image: nginx:1.20
+    ports:
+    - containerPort: 80
+      hostPort: 8080  # 호스트의 8080 포트에 바인딩
+      protocol: TCP
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"

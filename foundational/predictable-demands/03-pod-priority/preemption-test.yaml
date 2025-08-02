@@ -1,0 +1,269 @@
+# Preemption Test 예제
+# Pod 우선순위 기반 선점 시나리오
+
+---
+# 1단계: 낮은 우선순위로 클러스터 채우기
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: low-priority-filler
+  labels:
+    test: preemption
+    stage: "1-fill-cluster"
+spec:
+  replicas: 8   # Minikube 환경에 맞게 조정
+  selector:
+    matchLabels:
+      app: low-priority-filler
+  template:
+    metadata:
+      labels:
+        app: low-priority-filler
+        priority: batch
+    spec:
+      priorityClassName: batch-jobs  # 낮은 우선순위 (100)
+      containers:
+      - name: filler
+        image: nginx:1.20
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "50m"
+            memory: "64Mi"
+        env:
+        - name: POD_INFO
+          value: "Low priority filler pod - will be preempted"
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - sh
+              - -c
+              - echo "$(date) Pod is being terminated due to preemption" >> /dev/termination-log
+
+---
+# 2단계: 중간 우선순위 Pod 추가 (일부 선점 발생)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: medium-priority-preemptor
+  labels:
+    test: preemption
+    stage: "2-medium-preempt"
+spec:
+  priorityClassName: development  # 중간 우선순위 (500)
+  containers:
+  - name: app
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Medium Priority Pod Starting ==="
+        echo "Priority: development (500)"
+        echo "This pod should preempt some batch-jobs pods"
+        
+        # 시작 시간 기록
+        START_TIME=$(date)
+        echo "Started at: $START_TIME"
+        
+        # 스케줄링 지연 확인
+        SCHEDULED_TIME=$(date)
+        echo "Scheduled at: $SCHEDULED_TIME"
+        
+        while true; do
+          echo "$(date): Medium priority pod running..."
+          sleep 30
+        done
+    resources:
+      requests:
+        cpu: "300m"     # 여러 low priority pod을 선점해야 함
+        memory: "256Mi"
+      limits:
+        cpu: "300m"
+        memory: "256Mi"
+
+---
+# 3단계: 높은 우선순위 Pod 추가 (추가 선점)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: high-priority-preemptor
+  labels:
+    test: preemption
+    stage: "3-high-preempt"
+spec:
+  priorityClassName: production-high  # 높은 우선순위 (10000)
+  containers:
+  - name: app
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== High Priority Pod Starting ==="
+        echo "Priority: production-high (10000)"
+        echo "This pod should preempt lower priority pods"
+        
+        START_TIME=$(date)
+        echo "Requested at: $START_TIME"
+        
+        # 선점 대기 시간 측정
+        while [ ! -f /tmp/ready ]; do
+          echo "Waiting for resources to be freed by preemption..."
+          sleep 5
+        done
+        
+        SCHEDULED_TIME=$(date)
+        echo "Successfully scheduled at: $SCHEDULED_TIME"
+        
+        while true; do
+          echo "$(date): High priority pod running successfully"
+          sleep 30
+        done
+    
+    # 초기화 컨테이너로 준비 상태 표시
+    initContainers:
+    - name: init
+      image: busybox
+      command: ["sh", "-c", "touch /tmp/ready"]
+    
+    resources:
+      requests:
+        cpu: "500m"     # Minikube에 맞게 조정
+        memory: "512Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+---
+# 선점 모니터링 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: preemption-monitor
+  labels:
+    test: preemption
+    role: monitor
+spec:
+  serviceAccountName: preemption-monitor
+  priorityClassName: production-normal  # 안정적인 모니터링을 위해 중간 우선순위
+  containers:
+  - name: monitor
+    image: nicolaka/netshoot
+    command: ["sh", "-c"]
+    args:
+      - |
+        # kubectl 설치
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+        
+        echo "=== Preemption Monitor Started ==="
+        
+        # 모니터링 함수
+        monitor_preemption() {
+          echo -e "\n=== $(date) ==="
+          
+          # Pod 상태별 개수
+          echo "Pod Status Summary:"
+          kubectl get pods -l test=preemption -o wide | tail -n +2 | \
+            awk '{print $3}' | sort | uniq -c
+          
+          # 우선순위별 실행 중인 Pod
+          echo -e "\nRunning Pods by Priority:"
+          kubectl get pods -l test=preemption --field-selector=status.phase=Running \
+            -o custom-columns=NAME:.metadata.name,PRIORITY:.spec.priority,PRIORITY_CLASS:.spec.priorityClassName
+          
+          # Pending Pod 확인
+          echo -e "\nPending Pods:"
+          kubectl get pods -l test=preemption --field-selector=status.phase=Pending \
+            -o custom-columns=NAME:.metadata.name,PRIORITY:.spec.priority,REASON:.status.conditions[0].reason
+          
+          # 최근 선점 이벤트
+          echo -e "\nRecent Preemption Events:"
+          kubectl get events --sort-by='.lastTimestamp' | \
+            grep -E "(Preempted|Preempting|FailedScheduling)" | tail -5
+        }
+        
+        # 지속적인 모니터링
+        while true; do
+          monitor_preemption
+          sleep 20
+        done
+    
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "100m"
+        memory: "256Mi"
+
+---
+# 모니터링을 위한 ServiceAccount와 권한
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: preemption-monitor
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-reader
+rules:
+- apiGroups: [""]
+  resources: ["pods", "events"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: preemption-monitor-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pod-reader
+subjects:
+- kind: ServiceAccount
+  name: preemption-monitor
+  namespace: default
+
+---
+# PodDisruptionBudget으로 일부 Pod 보호
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: protect-some-fillers
+spec:
+  minAvailable: 5  # 최소 5개는 유지
+  selector:
+    matchLabels:
+      app: low-priority-filler
+
+---
+# 선점 시나리오 실행 스크립트
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: preemption-test-script
+data:
+  run-test.sh: |
+    #!/bin/sh
+    echo "=== Starting Preemption Test Scenario ==="
+    
+    echo "Phase 1: Filling cluster with low priority pods..."
+    kubectl apply -f /manifests/low-priority-filler.yaml
+    sleep 60
+    
+    echo "Phase 2: Adding medium priority pod (should trigger preemption)..."
+    kubectl apply -f /manifests/medium-priority-preemptor.yaml
+    sleep 30
+    
+    echo "Phase 3: Adding high priority pod (should trigger more preemption)..."
+    kubectl apply -f /manifests/high-priority-preemptor.yaml
+    sleep 30
+    
+    echo "Test scenario deployed. Monitor the preemption-monitor pod for results."

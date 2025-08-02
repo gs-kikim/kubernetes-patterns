@@ -1,0 +1,265 @@
+# Resource Quotas
+# 네임스페이스별 리소스 할당량 설정
+
+---
+# Production 네임스페이스 - 넉넉한 리소스
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-quota
+  namespace: production
+spec:
+  hard:
+    # Compute Resources (Minikube 환경에 맞게 조정)
+    requests.cpu: "4"             # 총 4 vCPU 요청 가능
+    requests.memory: "4Gi"        # 총 4GiB 메모리 요청 가능
+    limits.cpu: "8"               # 총 8 vCPU 제한
+    limits.memory: "8Gi"          # 총 8GiB 메모리 제한
+    
+    # Storage Resources
+    requests.storage: "10Gi"      # 총 10GiB 스토리지 요청 가능
+    persistentvolumeclaims: "10"  # 최대 10개 PVC
+    
+    # Object Count
+    pods: "20"                    # 최대 20개 Pod
+    services: "10"                # 최대 10개 Service
+    services.loadbalancers: "5"   # 최대 5개 LoadBalancer
+    services.nodeports: "10"      # 최대 10개 NodePort
+    
+    # ConfigMaps and Secrets
+    configmaps: "100"             # 최대 100개 ConfigMap
+    secrets: "100"                # 최대 100개 Secret
+    
+    # Other Resources
+    replicationcontrollers: "20"
+    deployments.apps: "50"
+    replicasets.apps: "100"
+    statefulsets.apps: "10"
+    jobs.batch: "100"
+    cronjobs.batch: "10"
+
+---
+# Staging 네임스페이스 - 중간 수준 리소스
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: staging-quota
+  namespace: staging
+spec:
+  hard:
+    # Compute Resources
+    requests.cpu: "2"
+    requests.memory: "2Gi"
+    limits.cpu: "4"
+    limits.memory: "4Gi"
+    
+    # Storage Resources
+    requests.storage: "5Gi"
+    persistentvolumeclaims: "5"
+    
+    # Object Count
+    pods: "15"
+    services: "8"
+    services.loadbalancers: "2"
+    services.nodeports: "5"
+    
+    # ConfigMaps and Secrets
+    configmaps: "50"
+    secrets: "50"
+
+---
+# Development 네임스페이스 - 제한적 리소스
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: development-quota
+  namespace: development
+spec:
+  hard:
+    # Compute Resources
+    requests.cpu: "1"
+    requests.memory: "1Gi"
+    limits.cpu: "2"
+    limits.memory: "2Gi"
+    
+    # Storage Resources
+    requests.storage: "2Gi"
+    persistentvolumeclaims: "3"
+    
+    # Object Count
+    pods: "10"
+    services: "5"
+    services.loadbalancers: "0"    # LoadBalancer 사용 금지
+    services.nodeports: "3"
+    
+    # ConfigMaps and Secrets
+    configmaps: "30"
+    secrets: "30"
+
+---
+# Team Alpha 전용 할당량
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-alpha-quota
+  namespace: team-alpha
+spec:
+  hard:
+    requests.cpu: "30"
+    requests.memory: "60Gi"
+    limits.cpu: "60"
+    limits.memory: "120Gi"
+    persistentvolumeclaims: "10"
+    pods: "75"
+
+---
+# Team Beta 전용 할당량 (데이터 처리팀 - 더 많은 스토리지)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-beta-quota
+  namespace: team-beta
+spec:
+  hard:
+    requests.cpu: "40"
+    requests.memory: "80Gi"
+    limits.cpu: "80"
+    limits.memory: "160Gi"
+    requests.storage: "2Ti"        # 데이터 처리를 위한 큰 스토리지
+    persistentvolumeclaims: "30"
+    pods: "100"
+
+---
+# CI/CD 네임스페이스 - Job 중심 할당량
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: ci-cd-quota
+  namespace: ci-cd
+spec:
+  hard:
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+    limits.cpu: "100"
+    limits.memory: "200Gi"
+    
+    # Job 관련 제한
+    count/jobs.batch: "50"         # 동시 실행 Job 수
+    count/cronjobs.batch: "20"
+    
+    # Pod 제한
+    pods: "100"
+    
+    # 임시 스토리지
+    requests.ephemeral-storage: "100Gi"
+    limits.ephemeral-storage: "200Gi"
+
+---
+# 우선순위 클래스별 할당량 (Production)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-high-priority-quota
+  namespace: production
+spec:
+  hard:
+    pods: "50"
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+  scopeSelector:
+    matchExpressions:
+    - operator: In
+      scopeName: PriorityClass
+      values: ["production-high"]
+
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-normal-priority-quota
+  namespace: production
+spec:
+  hard:
+    pods: "100"
+    requests.cpu: "30"
+    requests.memory: "60Gi"
+  scopeSelector:
+    matchExpressions:
+    - operator: In
+      scopeName: PriorityClass
+      values: ["production-normal"]
+
+---
+# QoS 클래스별 할당량
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: guaranteed-pods-quota
+  namespace: production
+spec:
+  hard:
+    pods: "50"
+  scopes:
+  - BestEffort     # Inverted - Guaranteed pods
+  scopeSelector:
+    matchExpressions:
+    - operator: NotIn
+      scopeName: PriorityClass
+      values: ["batch-jobs", "experimental"]
+
+---
+# 종료된 리소스 할당량 (히스토리 관리)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: terminated-resources-quota
+  namespace: production
+spec:
+  hard:
+    count/pods: "500"        # 종료된 Pod 포함 전체
+  scopes:
+  - Terminating             # 종료 중인 리소스
+  
+---
+# Cross-namespace 할당량 표시를 위한 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quota-summary
+  namespace: kube-system
+data:
+  summary.yaml: |
+    # 네임스페이스별 리소스 할당량 요약
+    namespaces:
+      production:
+        cpu_requests: 100
+        memory_requests: 200Gi
+        storage: 1Ti
+        priority: high
+        
+      staging:
+        cpu_requests: 50
+        memory_requests: 100Gi
+        storage: 500Gi
+        priority: medium
+        
+      development:
+        cpu_requests: 20
+        memory_requests: 40Gi
+        storage: 200Gi
+        priority: low
+        
+      team-alpha:
+        cpu_requests: 30
+        memory_requests: 60Gi
+        storage: default
+        
+      team-beta:
+        cpu_requests: 40
+        memory_requests: 80Gi
+        storage: 2Ti
+        
+      ci-cd:
+        cpu_requests: 50
+        memory_requests: 100Gi
+        storage: ephemeral

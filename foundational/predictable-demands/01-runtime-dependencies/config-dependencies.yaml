@@ -1,0 +1,261 @@
+# Configuration Dependencies 예제
+# ConfigMap과 Secret을 활용한 설정 관리
+
+---
+# ConfigMap - 애플리케이션 설정
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  # 키-값 형태의 설정
+  database.host: "postgres.example.com"
+  database.port: "5432"
+  database.name: "myapp"
+  log.level: "INFO"
+  cache.ttl: "3600"
+  
+  # 파일 형태의 설정
+  app.properties: |
+    # Application Configuration
+    app.name=Predictable Demands Demo
+    app.version=1.0.0
+    app.environment=development
+    
+    # Feature Flags
+    feature.newUI=true
+    feature.analytics=false
+    
+    # Performance Settings
+    thread.pool.size=10
+    connection.timeout=30000
+    
+  nginx.conf: |
+    server {
+        listen 80;
+        server_name example.com;
+        
+        location / {
+            proxy_pass http://backend:8080;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+        
+        location /health {
+            return 200 "healthy\n";
+        }
+    }
+
+---
+# Secret - 민감한 데이터
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+type: Opaque
+data:
+  # Base64로 인코딩된 값들
+  # echo -n 'admin' | base64
+  database.username: YWRtaW4=
+  # echo -n 'secretpassword' | base64
+  database.password: c2VjcmV0cGFzc3dvcmQ=
+  # echo -n 'my-api-key-12345' | base64
+  api.key: bXktYXBpLWtleS0xMjM0NQ==
+stringData:
+  # stringData는 자동으로 base64 인코딩됨
+  jwt.secret: "my-super-secret-jwt-key"
+
+---
+# Secret - TLS 인증서
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tls-secret
+type: kubernetes.io/tls
+data:
+  # 실제로는 유효한 인증서 사용
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCi4uLgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0t
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCi4uLgotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0t
+
+---
+# ConfigMap과 Secret을 사용하는 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-example
+  labels:
+    app: config-demo
+spec:
+  containers:
+  - name: app
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Application Starting ==="
+        echo "Environment Variables:"
+        env | grep -E "(DB_|APP_|API_)" | sort
+        
+        echo -e "\n=== Config Files ==="
+        echo "app.properties:"
+        cat /etc/config/app.properties
+        
+        echo -e "\n=== Secret Files ==="
+        echo "Database credentials (mounted as files):"
+        echo "Username: $(cat /etc/secrets/database.username)"
+        echo "Password: [HIDDEN]"
+        
+        # 애플리케이션 시뮬레이션
+        while true; do
+          echo "$(date): Application running with config from ConfigMap and Secret"
+          sleep 60
+        done
+    
+    # 환경변수로 주입
+    env:
+    # ConfigMap에서 개별 키 주입
+    - name: DB_HOST
+      valueFrom:
+        configMapKeyRef:
+          name: app-config
+          key: database.host
+    - name: DB_PORT
+      valueFrom:
+        configMapKeyRef:
+          name: app-config
+          key: database.port
+    
+    # Secret에서 개별 키 주입
+    - name: DB_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: app-secrets
+          key: database.username
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: app-secrets
+          key: database.password
+    
+    # ConfigMap 전체를 환경변수로 주입
+    envFrom:
+    - configMapRef:
+        name: app-config
+    
+    # 볼륨으로 마운트
+    volumeMounts:
+    - name: config-volume
+      mountPath: /etc/config
+    - name: secret-volume
+      mountPath: /etc/secrets
+      readOnly: true
+    - name: tls-volume
+      mountPath: /etc/tls
+      readOnly: true
+  
+  # Sidecar 컨테이너 - 설정 변경 감지
+  - name: config-watcher
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Config watcher started"
+        LAST_HASH=""
+        while true; do
+          CURRENT_HASH=$(cat /etc/config/* | md5sum)
+          if [ "$LAST_HASH" != "$CURRENT_HASH" ]; then
+            echo "$(date): Configuration changed!"
+            LAST_HASH=$CURRENT_HASH
+          fi
+          sleep 30
+        done
+    volumeMounts:
+    - name: config-volume
+      mountPath: /etc/config
+      readOnly: true
+  
+  volumes:
+  # ConfigMap을 볼륨으로 마운트
+  - name: config-volume
+    configMap:
+      name: app-config
+      items:
+      - key: app.properties
+        path: app.properties
+      - key: nginx.conf
+        path: nginx.conf
+  
+  # Secret을 볼륨으로 마운트
+  - name: secret-volume
+    secret:
+      secretName: app-secrets
+      defaultMode: 0400  # 읽기 전용, 소유자만
+  
+  # TLS Secret 마운트
+  - name: tls-volume
+    secret:
+      secretName: tls-secret
+      items:
+      - key: tls.crt
+        path: server.crt
+      - key: tls.key
+        path: server.key
+        mode: 0400  # 개별 파일 권한 설정
+
+---
+# 동적으로 업데이트되는 ConfigMap 예제
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dynamic-config-example
+  labels:
+    app: dynamic-config
+spec:
+  containers:
+  - name: web
+    image: nginx:1.20
+    volumeMounts:
+    - name: nginx-config
+      mountPath: /etc/nginx/conf.d
+      readOnly: true
+    - name: reload-script
+      mountPath: /usr/local/bin
+    
+    # ConfigMap 변경 시 자동 리로드
+    lifecycle:
+      postStart:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - |
+            chmod +x /usr/local/bin/reload-nginx.sh
+            /usr/local/bin/reload-nginx.sh &
+  
+  volumes:
+  - name: nginx-config
+    configMap:
+      name: app-config
+      items:
+      - key: nginx.conf
+        path: default.conf
+  
+  - name: reload-script
+    configMap:
+      name: nginx-reload-script
+      defaultMode: 0755
+
+---
+# Nginx 리로드 스크립트
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-reload-script
+data:
+  reload-nginx.sh: |
+    #!/bin/sh
+    while true; do
+      # ConfigMap 변경 감지 (간단한 방법)
+      sleep 60
+      nginx -t && nginx -s reload && echo "$(date): Nginx reloaded"
+    done

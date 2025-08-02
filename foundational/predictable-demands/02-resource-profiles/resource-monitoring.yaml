@@ -1,0 +1,321 @@
+# Resource Monitoring 예제
+# 리소스 사용량 모니터링과 분석을 위한 도구들
+
+---
+# Metrics Server 확인 (사전 요구사항)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metrics-checker
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metrics-checker
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+- kind: ServiceAccount
+  name: metrics-checker
+  namespace: default
+
+---
+# 리소스 모니터링 대시보드 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-dashboard
+  labels:
+    app: monitoring-dashboard
+spec:
+  serviceAccountName: metrics-checker
+  containers:
+  - name: dashboard
+    image: nicolaka/netshoot
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Resource Monitoring Dashboard ==="
+        
+        # kubectl 설치 (간단한 모니터링용)
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+        
+        # 모니터링 함수
+        monitor_resources() {
+          while true; do
+            clear
+            echo "=== Kubernetes Resource Monitor ==="
+            echo "Time: $(date)"
+            echo
+            
+            # Node 리소스 사용량
+            echo "=== Node Resources ==="
+            kubectl top nodes 2>/dev/null || echo "Metrics server not available"
+            echo
+            
+            # Pod 리소스 사용량
+            echo "=== Pod Resources ==="
+            kubectl top pods --all-namespaces | head -20
+            echo
+            
+            # 리소스 할당 현황
+            echo "=== Resource Allocations ==="
+            kubectl describe nodes | grep -A 5 "Allocated resources:"
+            
+            sleep 30
+          done
+        }
+        
+        # 모니터링 시작
+        monitor_resources
+    
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "100m"
+        memory: "256Mi"
+
+---
+# 다양한 리소스 프로파일을 가진 워크로드들
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guaranteed-workload
+  labels:
+    qos: guaranteed
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: guaranteed-app
+  template:
+    metadata:
+      labels:
+        app: guaranteed-app
+        qos: guaranteed
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.20
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: burstable-workload
+  labels:
+    qos: burstable
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: burstable-app
+  template:
+    metadata:
+      labels:
+        app: burstable-app
+        qos: burstable
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.20
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: best-effort-workload
+  labels:
+    qos: best-effort
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: best-effort-app
+  template:
+    metadata:
+      labels:
+        app: best-effort-app
+        qos: best-effort
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.20
+        # 리소스 설정 없음
+
+---
+# 리소스 사용 패턴 분석 Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: resource-analyzer
+spec:
+  template:
+    spec:
+      serviceAccountName: metrics-checker
+      containers:
+      - name: analyzer
+        image: bitnami/kubectl:latest
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "=== Resource Usage Analysis ==="
+            
+            # QoS 클래스별 Pod 수 집계
+            echo -e "\n1. QoS Class Distribution:"
+            kubectl get pods --all-namespaces -o json | \
+              jq -r '.items[] | 
+                select(.status.qosClass != null) | 
+                .status.qosClass' | \
+              sort | uniq -c
+            
+            # 리소스 요청 대비 실제 사용량 분석
+            echo -e "\n2. Resource Utilization Analysis:"
+            
+            # CPU 사용률 계산
+            echo -e "\nCPU Utilization:"
+            kubectl top pods --all-namespaces --no-headers | \
+              awk '{print $3}' | \
+              sed 's/m$//' | \
+              awk '{sum+=$1; count++} END {print "Average CPU: " sum/count "m"}'
+            
+            # 메모리 사용률 계산
+            echo -e "\nMemory Utilization:"
+            kubectl top pods --all-namespaces --no-headers | \
+              awk '{print $4}' | \
+              sed 's/Mi$//' | \
+              awk '{sum+=$1; count++} END {print "Average Memory: " sum/count "Mi"}'
+            
+            # 노드별 리소스 압박 상황
+            echo -e "\n3. Node Pressure Status:"
+            kubectl get nodes -o json | \
+              jq -r '.items[] | 
+                {name: .metadata.name, 
+                 conditions: .status.conditions[] | 
+                 select(.type == "MemoryPressure" or .type == "DiskPressure" or .type == "PIDPressure") | 
+                 {type: .type, status: .status}}'
+            
+            # 최근 Eviction 이벤트
+            echo -e "\n4. Recent Eviction Events:"
+            kubectl get events --all-namespaces --field-selector reason=Evicted \
+              --sort-by='.lastTimestamp' | tail -10
+            
+      restartPolicy: Never
+
+---
+# 실시간 리소스 압박 시뮬레이터
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stress-scenarios
+data:
+  cpu-spike.sh: |
+    #!/bin/sh
+    echo "Simulating CPU spike..."
+    stress --cpu 2 --timeout 30s
+    
+  memory-spike.sh: |
+    #!/bin/sh
+    echo "Simulating memory spike..."
+    stress --vm 1 --vm-bytes 200M --timeout 30s
+    
+  gradual-increase.sh: |
+    #!/bin/sh
+    echo "Simulating gradual resource increase..."
+    for i in $(seq 1 10); do
+      echo "Step $i/10"
+      stress --cpu 1 --vm 1 --vm-bytes $((i * 20))M --timeout 10s
+      sleep 5
+    done
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: stress-simulator
+  labels:
+    app: stress-simulator
+spec:
+  containers:
+  - name: simulator
+    image: progrium/stress
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "=== Stress Test Simulator ==="
+        echo "Running various stress scenarios..."
+        
+        # 스크립트 실행 권한 설정
+        chmod +x /scripts/*
+        
+        while true; do
+          echo -e "\n$(date): Starting new stress cycle"
+          
+          # CPU 스파이크
+          /scripts/cpu-spike.sh
+          sleep 30
+          
+          # 메모리 스파이크
+          /scripts/memory-spike.sh
+          sleep 30
+          
+          # 점진적 증가
+          /scripts/gradual-increase.sh
+          sleep 60
+        done
+    
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+    
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+  
+  volumes:
+  - name: scripts
+    configMap:
+      name: stress-scenarios
+      defaultMode: 0755
+
+---
+# Prometheus 메트릭 수집을 위한 ServiceMonitor (Prometheus Operator 필요)
+apiVersion: v1
+kind: Service
+metadata:
+  name: resource-metrics
+  labels:
+    app: resource-monitoring
+spec:
+  ports:
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+  selector:
+    app: monitoring-dashboard

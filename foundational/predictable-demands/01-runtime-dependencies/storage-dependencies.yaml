@@ -1,0 +1,166 @@
+# Storage Dependencies 예제
+# 다양한 스토리지 타입의 생명주기와 특성을 보여주는 예제
+
+---
+# PersistentVolume (클러스터 관리자가 생성)
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: example-pv
+  labels:
+    type: local
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain  # PVC 삭제 후에도 데이터 유지
+  storageClassName: manual
+  hostPath:
+    path: "/mnt/data"  # 실제 환경에서는 NFS, AWS EBS 등 사용
+
+---
+# PersistentVolumeClaim (개발자가 요청)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: example-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: manual
+  selector:
+    matchLabels:
+      type: local
+
+---
+# emptyDir 볼륨을 사용하는 Pod (임시 스토리지)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: emptydir-example
+  labels:
+    app: emptydir-demo
+spec:
+  containers:
+  # 데이터 생성 컨테이너
+  - name: writer
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Writing data to shared volume..."
+        while true; do
+          echo "$(date): Data from writer" >> /shared/data.txt
+          sleep 30
+        done
+    volumeMounts:
+    - name: shared-data
+      mountPath: /shared
+  
+  # 데이터 읽기 컨테이너
+  - name: reader
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Reading data from shared volume..."
+        while true; do
+          if [ -f /shared/data.txt ]; then
+            echo "Latest entry: $(tail -1 /shared/data.txt)"
+          fi
+          sleep 10
+        done
+    volumeMounts:
+    - name: shared-data
+      mountPath: /shared
+  
+  volumes:
+  - name: shared-data
+    emptyDir: {}  # Pod 삭제 시 데이터 손실
+
+---
+# PVC를 사용하는 Pod (영구 스토리지)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-example
+  labels:
+    app: pvc-demo
+spec:
+  containers:
+  - name: app
+    image: nginx:1.20
+    volumeMounts:
+    - name: persistent-storage
+      mountPath: /usr/share/nginx/html
+    - name: init-script
+      mountPath: /docker-entrypoint.d
+  
+  # 초기화 컨테이너 - 영구 스토리지에 초기 데이터 설정
+  initContainers:
+  - name: init-data
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        if [ ! -f /data/index.html ]; then
+          echo "<h1>Persistent Storage Example</h1>" > /data/index.html
+          echo "<p>Created at: $(date)</p>" >> /data/index.html
+        else
+          echo "<p>Updated at: $(date)</p>" >> /data/index.html
+        fi
+    volumeMounts:
+    - name: persistent-storage
+      mountPath: /data
+  
+  volumes:
+  - name: persistent-storage
+    persistentVolumeClaim:
+      claimName: example-pvc
+  - name: init-script
+    configMap:
+      name: nginx-init-script
+      defaultMode: 0755
+
+---
+# hostPath 볼륨을 사용하는 Pod (노드 로컬 스토리지)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostpath-example
+  labels:
+    app: hostpath-demo
+spec:
+  containers:
+  - name: log-reader
+    image: busybox
+    command: ["sh", "-c"]
+    args:
+      - |
+        echo "Reading host logs..."
+        tail -f /host-logs/syslog || echo "Log file not found"
+    volumeMounts:
+    - name: host-logs
+      mountPath: /host-logs
+      readOnly: true
+  
+  volumes:
+  - name: host-logs
+    hostPath:
+      path: /var/log  # 호스트의 로그 디렉토리
+      type: Directory
+
+---
+# Nginx 초기화 스크립트를 위한 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-init-script
+data:
+  10-update-index.sh: |
+    #!/bin/sh
+    echo "<hr><p>Pod started at: $(date)</p>" >> /usr/share/nginx/html/index.html
