@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: blue-green-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: random-generator-blue
+  namespace: blue-green-demo
+  labels:
+    app: random-generator
+    version: blue
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: random-generator
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: random-generator
+        version: blue
+    spec:
+      containers:
+      - name: random-generator
+        image: k8spatterns/random-generator:1.0
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PATTERN
+          value: "Blue-Green (Blue Version)"
+        - name: VERSION
+          value: "blue"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5

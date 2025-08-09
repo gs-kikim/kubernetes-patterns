@@ -1,0 +1,24 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: blue-green-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  path: ./apps/blue-green
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: local-repo
+  targetNamespace: blue-green-demo
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: random-generator-blue
+      namespace: blue-green-demo
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: random-generator-green
+      namespace: blue-green-demo
+  timeout: 3m
+  wait: true

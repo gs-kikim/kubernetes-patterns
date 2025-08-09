@@ -1,0 +1,22 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: canary-app
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: flagger
+  interval: 1m
+  path: ./apps/canary
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: local-repo
+  targetNamespace: canary-demo
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: random-generator
+      namespace: canary-demo
+  timeout: 3m
+  wait: true

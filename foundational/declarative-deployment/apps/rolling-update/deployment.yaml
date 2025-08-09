@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rolling-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: random-generator
+  namespace: rolling-demo
+  labels:
+    app: random-generator
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: random-generator
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # 최대 1개의 추가 파드 허용
+      maxUnavailable: 1  # 최대 1개의 파드 불가용 허용
+  template:
+    metadata:
+      labels:
+        app: random-generator
+    spec:
+      containers:
+      - name: random-generator
+        image: k8spatterns/random-generator:1.0
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PATTERN
+          value: "Rolling Update"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: random-generator
+  namespace: rolling-demo
+spec:
+  selector:
+    app: random-generator
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP

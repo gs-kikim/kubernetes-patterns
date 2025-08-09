@@ -1,0 +1,20 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: rolling-update-app
+  namespace: flux-system
+spec:
+  interval: 1m
+  path: ./apps/rolling-update
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: local-repo
+  targetNamespace: rolling-demo
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: random-generator
+      namespace: rolling-demo
+  timeout: 3m
+  wait: true

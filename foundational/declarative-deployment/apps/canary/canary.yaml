@@ -1,0 +1,64 @@
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: random-generator
+  namespace: canary-demo
+spec:
+  # Target reference
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: random-generator
+  
+  # Service configuration
+  service:
+    port: 80
+    targetPort: 8080
+    name: random-generator
+  
+  # Canary analysis configuration
+  analysis:
+    # Schedule interval (default 60s)
+    interval: 30s
+    
+    # Max number of failed metric checks before rollback
+    threshold: 5
+    
+    # Max traffic percentage routed to canary
+    maxWeight: 50
+    
+    # Canary increment step (percentage)
+    stepWeight: 10
+    
+    # Promotion increment step (percentage)
+    stepWeightPromotion: 20
+    
+    # Metrics to check
+    metrics:
+    - name: request-success-rate
+      # Minimum request success rate (percentage)
+      thresholdRange:
+        min: 99
+      interval: 30s
+    
+    - name: request-duration
+      # Maximum req duration P99 (milliseconds)
+      thresholdRange:
+        max: 500
+      interval: 30s
+    
+    # Webhooks for testing
+    webhooks:
+    - name: acceptance-test
+      type: pre-rollout
+      url: http://flagger-loadtester.flagger-system/
+      timeout: 30s
+      metadata:
+        type: bash
+        cmd: "curl -sd 'test' http://random-generator-canary.canary-demo/actuator/health"
+    
+    - name: load-test
+      type: rollout
+      url: http://flagger-loadtester.flagger-system/
+      metadata:
+        cmd: "hey -z 2m -q 10 -c 2 http://random-generator-canary.canary-demo/"
