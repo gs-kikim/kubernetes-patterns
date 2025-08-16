@@ -1,0 +1,91 @@
+# Combined Probes - All Three Probes Working Together
+# This deployment demonstrates all three probe types working in harmony
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: combined-probes-test
+  labels:
+    test: combined-probes
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: combined-probes-test
+  template:
+    metadata:
+      labels:
+        app: combined-probes-test
+    spec:
+      containers:
+      - name: random-generator
+        image: k8spatterns/random-generator:2.0
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Moderate startup delay
+        - name: DELAY_STARTUP
+          value: "45"
+        startupProbe:
+          # Check if application has started
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 10  # Max 50 seconds for startup
+          successThreshold: 1
+        livenessProbe:
+          # Check if application is alive and responsive
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8080
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        readinessProbe:
+          # Check if application is ready to receive traffic
+          exec:
+            command:
+            - stat
+            - /tmp/random-generator-ready
+          periodSeconds: 5
+          timeoutSeconds: 2
+          failureThreshold: 2
+          successThreshold: 1
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "200m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: combined-probes-test
+spec:
+  selector:
+    app: combined-probes-test
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http
+---
+# ConfigMap for health check status tracking
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: health-check-config
+data:
+  check-interval: "5"
+  failure-threshold: "3"

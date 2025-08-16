@@ -1,0 +1,72 @@
+# Startup Probe - Slow Starting Application Test
+# This deployment tests startup probe for applications with long initialization time
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: startup-probe-test
+  labels:
+    test: startup-probe
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: startup-probe-test
+  template:
+    metadata:
+      labels:
+        app: startup-probe-test
+    spec:
+      containers:
+      - name: random-generator
+        image: k8spatterns/random-generator:2.0
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        # Simulate very slow startup (90 seconds)
+        - name: DELAY_STARTUP
+          value: "90"
+        startupProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 12  # Max 120 seconds for startup
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - stat
+            - /tmp/random-generator-ready
+          periodSeconds: 5
+          failureThreshold: 1
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "200m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: startup-probe-test
+spec:
+  selector:
+    app: startup-probe-test
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: http

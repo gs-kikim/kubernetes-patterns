@@ -1,0 +1,45 @@
+# Liveness Probe - Exec Command Check Test
+# This deployment tests command execution-based liveness probe functionality
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: liveness-exec-test
+  labels:
+    test: liveness-exec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: liveness-exec-test
+  template:
+    metadata:
+      labels:
+        app: liveness-exec-test
+    spec:
+      containers:
+      - name: busybox
+        image: busybox:latest
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          touch /tmp/healthy
+          sleep 30
+          rm -f /tmp/healthy
+          sleep 600
+        livenessProbe:
+          exec:
+            command:
+            - cat
+            - /tmp/healthy
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
