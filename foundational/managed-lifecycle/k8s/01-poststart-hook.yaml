@@ -1,0 +1,148 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: default
+data:
+  config.json: |
+    {
+      "app_name": "Managed Lifecycle Demo",
+      "version": "1.0.0",
+      "features": {
+        "cache": true,
+        "metrics": true,
+        "logging": "debug"
+      }
+    }
+  init.sh: |
+    #!/bin/sh
+    echo "=== PostStart Hook 실행 시작 ==="
+    echo "시작 시간: $(date)" > /tmp/poststart.log
+    
+    # 1. 설정 파일 복사
+    echo "설정 파일 복사 중..."
+    cp /config/config.json /app/config.json
+    
+    # 2. 캐시 워밍업 시뮬레이션
+    echo "캐시 워밍업 중..."
+    for i in $(seq 1 5); do
+      echo "  캐시 항목 $i 로드..." >> /tmp/poststart.log
+      sleep 1
+    done
+    
+    # 3. 외부 서비스 등록 시뮬레이션
+    echo "서비스 레지스트리 등록 중..."
+    echo "  서비스 이름: $(hostname)" >> /tmp/poststart.log
+    echo "  등록 시간: $(date)" >> /tmp/poststart.log
+    
+    # 4. 초기화 완료 마커 생성
+    touch /tmp/app-initialized
+    echo "=== PostStart Hook 완료 ==="
+    echo "완료 시간: $(date)" >> /tmp/poststart.log
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: poststart-demo
+  labels:
+    app: poststart-demo
+spec:
+  containers:
+  - name: app
+    image: busybox:latest
+    command: ["/bin/sh"]
+    args:
+    - -c
+    - |
+      echo "메인 컨테이너 시작: $(date)"
+      
+      # PostStart hook 완료 대기
+      while [ ! -f /tmp/app-initialized ]; do
+        echo "초기화 대기 중..."
+        sleep 2
+      done
+      
+      echo "애플리케이션 초기화 완료!"
+      echo "PostStart 로그:"
+      cat /tmp/poststart.log
+      
+      # 애플리케이션 실행 시뮬레이션
+      while true; do
+        echo "애플리케이션 실행 중: $(date)"
+        sleep 10
+      done
+    
+    lifecycle:
+      postStart:
+        exec:
+          command:
+          - /bin/sh
+          - /config/init.sh
+    
+    volumeMounts:
+    - name: config
+      mountPath: /config
+    - name: tmp
+      mountPath: /tmp
+    
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "200m"
+  
+  volumes:
+  - name: config
+    configMap:
+      name: app-config
+      defaultMode: 0755
+  - name: tmp
+    emptyDir: {}
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: poststart-async-test
+  labels:
+    app: poststart-async
+spec:
+  containers:
+  - name: main
+    image: busybox:latest
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      echo "메인 프로세스 시작: $(date '+%Y-%m-%d %H:%M:%S')" | tee /shared/main.log
+      for i in $(seq 1 20); do
+        echo "메인 프로세스 실행 중 - $i초: $(date '+%Y-%m-%d %H:%M:%S')" | tee -a /shared/main.log
+        sleep 1
+      done
+      echo "메인 프로세스 완료: $(date '+%Y-%m-%d %H:%M:%S')" | tee -a /shared/main.log
+      tail -f /dev/null
+    
+    lifecycle:
+      postStart:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - |
+            echo "PostStart 시작: $(date '+%Y-%m-%d %H:%M:%S')" > /shared/poststart.log
+            # PostStart가 10초 동안 실행
+            for i in $(seq 1 10); do
+              echo "PostStart 실행 중 - $i초: $(date '+%Y-%m-%d %H:%M:%S')" >> /shared/poststart.log
+              sleep 1
+            done
+            echo "PostStart 완료: $(date '+%Y-%m-%d %H:%M:%S')" >> /shared/poststart.log
+    
+    volumeMounts:
+    - name: shared
+      mountPath: /shared
+  
+  volumes:
+  - name: shared
+    emptyDir: {}

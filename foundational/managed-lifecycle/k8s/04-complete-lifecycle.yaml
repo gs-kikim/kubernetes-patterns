@@ -1,0 +1,254 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lifecycle-scripts
+  namespace: default
+data:
+  poststart.sh: |
+    #!/bin/sh
+    echo "[PostStart] 시작: $(date '+%Y-%m-%d %H:%M:%S')"
+    
+    # 1. 설정 파일 로드
+    echo "[PostStart] 설정 파일 로드 중..."
+    if [ -f /config/app.conf ]; then
+      cp /config/app.conf /app/config/
+    fi
+    
+    # 2. 캐시 초기화
+    echo "[PostStart] 캐시 초기화 중..."
+    for i in $(seq 1 3); do
+      echo "  - 캐시 블록 $i 로드"
+      sleep 1
+    done
+    
+    # 3. 서비스 레지스트리 등록
+    echo "[PostStart] 서비스 레지스트리에 등록..."
+    echo "  서비스: $(hostname)"
+    echo "  IP: $(cat /etc/hostname)"
+    
+    # 4. 준비 완료 신호
+    touch /tmp/ready
+    echo "[PostStart] 완료: $(date '+%Y-%m-%d %H:%M:%S')"
+  
+  prestop.sh: |
+    #!/bin/sh
+    echo "[PreStop] 시작: $(date '+%Y-%m-%d %H:%M:%S')"
+    
+    # 1. 헬스체크 비활성화
+    echo "[PreStop] 헬스체크 비활성화..."
+    rm -f /tmp/ready
+    touch /tmp/terminating
+    
+    # 2. 서비스 레지스트리에서 제거
+    echo "[PreStop] 서비스 레지스트리에서 제거..."
+    sleep 2
+    
+    # 3. 활성 연결 드레이닝
+    echo "[PreStop] 연결 드레이닝..."
+    CONNECTIONS=3
+    while [ $CONNECTIONS -gt 0 ]; do
+      echo "  활성 연결: $CONNECTIONS"
+      sleep 1
+      CONNECTIONS=$((CONNECTIONS - 1))
+    done
+    
+    # 4. 버퍼 플러시
+    echo "[PreStop] 버퍼 플러시..."
+    sync
+    
+    echo "[PreStop] 완료: $(date '+%Y-%m-%d %H:%M:%S')"
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: complete-lifecycle
+  labels:
+    app: complete-lifecycle
+spec:
+  terminationGracePeriodSeconds: 60
+  
+  initContainers:
+  - name: init
+    image: busybox:1.35
+    command: ['sh', '-c']
+    args:
+    - |
+      echo "[Init] 초기 설정 시작"
+      echo "[Init] 데이터베이스 스키마 확인..."
+      sleep 2
+      echo "[Init] 의존성 서비스 대기..."
+      sleep 3
+      echo "[Init] 초기 설정 완료"
+  
+  containers:
+  - name: app
+    image: busybox:1.35
+    command: ["/bin/sh"]
+    args:
+    - -c
+    - |
+      # SIGTERM 핸들러 설정
+      handle_sigterm() {
+        echo "[SIGTERM] 수신: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "[SIGTERM] Graceful shutdown 시작..."
+        
+        # 진행 중인 작업 완료
+        TASKS=3
+        while [ $TASKS -gt 0 ]; do
+          echo "[SIGTERM] 작업 $TASKS 완료 중..."
+          sleep 2
+          TASKS=$((TASKS - 1))
+        done
+        
+        echo "[SIGTERM] 상태 저장..."
+        echo "최종 상태: $(date)" > /tmp/final-state.log
+        
+        echo "[SIGTERM] Graceful shutdown 완료"
+        exit 0
+      }
+      
+      trap handle_sigterm TERM
+      
+      echo "[Main] 애플리케이션 시작: $(date '+%Y-%m-%d %H:%M:%S')"
+      
+      # PostStart 완료 대기
+      echo "[Main] 초기화 대기 중..."
+      while [ ! -f /tmp/ready ]; do
+        sleep 1
+      done
+      echo "[Main] 초기화 완료!"
+      
+      # 메인 루프
+      COUNTER=0
+      while true; do
+        COUNTER=$((COUNTER + 1))
+        
+        # 종료 모드 확인
+        if [ -f /tmp/terminating ]; then
+          echo "[Main] 종료 모드 - 새 요청 거부"
+        else
+          echo "[Main] 정상 운영 중 - 작업 #$COUNTER"
+        fi
+        
+        sleep 5
+      done
+    
+    lifecycle:
+      postStart:
+        exec:
+          command: ["/bin/sh", "/scripts/poststart.sh"]
+      preStop:
+        exec:
+          command: ["/bin/sh", "/scripts/prestop.sh"]
+    
+    livenessProbe:
+      exec:
+        command:
+        - sh
+        - -c
+        - '[ ! -f /tmp/terminating ]'
+      initialDelaySeconds: 10
+      periodSeconds: 5
+    
+    readinessProbe:
+      exec:
+        command:
+        - sh
+        - -c
+        - '[ -f /tmp/ready ] && [ ! -f /tmp/terminating ]'
+      initialDelaySeconds: 5
+      periodSeconds: 3
+    
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "200m"
+    
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+    - name: tmp
+      mountPath: /tmp
+  
+  volumes:
+  - name: scripts
+    configMap:
+      name: lifecycle-scripts
+      defaultMode: 0755
+  - name: tmp
+    emptyDir: {}
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lifecycle-job
+  labels:
+    app: lifecycle-job
+spec:
+  backoffLimit: 2
+  completions: 1
+  parallelism: 1
+  ttlSecondsAfterFinished: 60
+  template:
+    metadata:
+      labels:
+        app: lifecycle-job
+    spec:
+      restartPolicy: OnFailure
+      terminationGracePeriodSeconds: 30
+      
+      containers:
+      - name: job-processor
+        image: busybox:1.35
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          # Job 처리 로직
+          handle_term() {
+            echo "[Job] SIGTERM 수신 - 작업 정리 중..."
+            # 중간 결과 저장
+            echo "중간 결과 저장됨: $(date)" > /tmp/checkpoint.txt
+            exit 0
+          }
+          
+          trap handle_term TERM
+          
+          echo "[Job] 배치 작업 시작: $(date)"
+          
+          # 작업 수행
+          for i in $(seq 1 10); do
+            echo "[Job] 단계 $i/10 처리 중..."
+            sleep 2
+            
+            # 체크포인트
+            echo "완료: 단계 $i" >> /tmp/progress.txt
+          done
+          
+          echo "[Job] 배치 작업 완료: $(date)"
+        
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                echo "[Job PreStop] 정리 작업 시작"
+                # 결과 업로드 시뮬레이션
+                echo "[Job PreStop] 결과 업로드 중..."
+                sleep 3
+                echo "[Job PreStop] 정리 완료"
+        
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"

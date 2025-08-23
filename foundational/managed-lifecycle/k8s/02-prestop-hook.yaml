@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prestop-scripts
+  namespace: default
+data:
+  cleanup.sh: |
+    #!/bin/sh
+    echo "=== PreStop Hook 시작 ==="
+    echo "종료 시작 시간: $(date)"
+    
+    # 1. 로드밸런서에서 제거 시뮬레이션
+    echo "로드밸런서에서 인스턴스 제거 중..."
+    echo "  인스턴스 ID: $(hostname)"
+    sleep 2
+    
+    # 2. 활성 연결 확인 및 대기
+    echo "활성 연결 확인 중..."
+    CONNECTIONS=5  # 시뮬레이션을 위한 초기값
+    while [ $CONNECTIONS -gt 0 ]; do
+      echo "  활성 연결 $CONNECTIONS개 남음..."
+      sleep 1
+      CONNECTIONS=$((CONNECTIONS - 1))
+    done
+    echo "모든 연결 종료됨"
+    
+    # 3. 캐시 플러시
+    echo "캐시 데이터 플러시 중..."
+    sleep 2
+    
+    # 4. 로그 저장
+    echo "로그 파일 저장 중..."
+    echo "  로그 저장 위치: /tmp/app-final.log"
+    echo "종료 시간: $(date)" > /tmp/app-final.log
+    
+    # 5. 상태 저장
+    echo "애플리케이션 상태 저장 중..."
+    sleep 1
+    
+    echo "=== PreStop Hook 완료 ==="
+    echo "종료 완료 시간: $(date)"
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: prestop-demo
+  labels:
+    app: prestop-demo
+spec:
+  terminationGracePeriodSeconds: 30
+  containers:
+  - name: web-server
+    image: nginx:alpine
+    ports:
+    - containerPort: 80
+    lifecycle:
+      preStop:
+        exec:
+          command:
+          - /bin/sh
+          - /scripts/cleanup.sh
+    volumeMounts:
+    - name: scripts
+      mountPath: /scripts
+    - name: tmp
+      mountPath: /tmp
+  
+  volumes:
+  - name: scripts
+    configMap:
+      name: prestop-scripts
+      defaultMode: 0755
+  - name: tmp
+    emptyDir: {}
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: prestop-timing-test
+  labels:
+    app: prestop-timing
+spec:
+  terminationGracePeriodSeconds: 60  # PreStop + SIGTERM 처리를 위한 충분한 시간
+  containers:
+  - name: app
+    image: busybox:latest
+    command: ["/bin/sh"]
+    args:
+    - -c
+    - |
+      # SIGTERM 핸들러 설정
+      trap 'echo "SIGTERM 수신: $(date)"; sleep 5; echo "SIGTERM 처리 완료: $(date)"; exit 0' TERM
+      
+      echo "애플리케이션 시작: $(date)"
+      
+      # 메인 애플리케이션 루프
+      while true; do
+        echo "애플리케이션 실행 중: $(date)"
+        sleep 5
+      done
+    
+    lifecycle:
+      preStop:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - |
+            echo "PreStop 시작: $(date)"
+            echo "PreStop에서 10초 대기..."
+            sleep 10
+            echo "PreStop 완료: $(date)"
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: prestop-graceful-demo
+  labels:
+    app: prestop-graceful
+spec:
+  terminationGracePeriodSeconds: 45
+  containers:
+  - name: app
+    image: busybox:latest
+    command: ["/bin/sh"]
+    args:
+    - -c
+    - |
+      # 활성 작업 카운터 (시뮬레이션)
+      ACTIVE_TASKS=10
+      
+      # SIGTERM 핸들러
+      trap 'handle_sigterm' TERM
+      
+      handle_sigterm() {
+        echo "SIGTERM 수신: $(date)"
+        echo "활성 작업 $ACTIVE_TASKS개 처리 중..."
+        
+        while [ $ACTIVE_TASKS -gt 0 ]; do
+          echo "  작업 $ACTIVE_TASKS 완료 중..."
+          sleep 2
+          ACTIVE_TASKS=$((ACTIVE_TASKS - 1))
+        done
+        
+        echo "모든 작업 완료: $(date)"
+        exit 0
+      }
+      
+      echo "애플리케이션 시작: $(date)"
+      
+      # 메인 루프
+      while true; do
+        echo "애플리케이션 실행 중 (활성 작업: $ACTIVE_TASKS): $(date)"
+        sleep 5
+      done
+    
+    lifecycle:
+      preStop:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - |
+            echo "=== PreStop Hook 실행 ==="
+            echo "시작 시간: $(date)"
+            
+            # 서비스 디스커버리에서 제거
+            echo "서비스 레지스트리에서 제거 중..."
+            sleep 3
+            
+            # 헬스체크 비활성화
+            echo "헬스체크 비활성화..."
+            touch /tmp/maintenance_mode
+            
+            # 새 요청 거부 설정
+            echo "새 요청 거부 모드 활성화..."
+            sleep 2
+            
+            echo "PreStop 완료: $(date)"
+            echo "=== SIGTERM 전송 대기 중 ==="

@@ -1,0 +1,289 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lifecycle-app
+  labels:
+    app: lifecycle-app
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: lifecycle-app
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lifecycle-app
+  labels:
+    app: lifecycle-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: lifecycle-app
+  template:
+    metadata:
+      labels:
+        app: lifecycle-app
+    spec:
+      terminationGracePeriodSeconds: 60  # Graceful shutdown을 위한 충분한 시간
+      containers:
+      - name: app
+        image: lifecycle-demo:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        
+        # Health probes
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        
+        # Lifecycle hooks
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                echo "PostStart: 초기화 작업 시작"
+                # 서비스 메시에 등록
+                echo "서비스 메시 등록 중..."
+                sleep 2
+                echo "PostStart: 초기화 완료"
+          
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                echo "PreStop: 종료 준비 시작"
+                # 서비스 메시에서 제거
+                echo "서비스 메시에서 제거 중..."
+                sleep 3
+                # readiness probe를 실패하도록 마커 생성
+                touch /tmp/terminating
+                # 진행 중인 요청 완료 대기
+                sleep 5
+                echo "PreStop: 종료 준비 완료"
+        
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sigterm-handler-demo
+  labels:
+    app: sigterm-demo
+spec:
+  terminationGracePeriodSeconds: 30
+  containers:
+  - name: app
+    image: busybox:latest
+    command: ["/bin/sh"]
+    args:
+    - -c
+    - |
+      # PID 1로 실행되는 경우를 위한 시그널 핸들러 설정
+      
+      # 정리 작업 함수
+      cleanup() {
+        echo "=== SIGTERM 수신: $(date) ==="
+        echo "정리 작업 시작..."
+        
+        # 1. 활성 연결 종료
+        echo "활성 연결 종료 중..."
+        sleep 3
+        
+        # 2. 상태 저장
+        echo "애플리케이션 상태 저장 중..."
+        echo "최종 상태: $(date)" > /tmp/final-state.txt
+        sleep 2
+        
+        # 3. 리소스 해제
+        echo "리소스 해제 중..."
+        sleep 2
+        
+        echo "정리 작업 완료: $(date)"
+        echo "=== 정상 종료 ==="
+        exit 0
+      }
+      
+      # SIGTERM 핸들러 등록
+      trap cleanup TERM INT
+      
+      echo "애플리케이션 시작: $(date)"
+      echo "PID: $$"
+      
+      # 메인 애플리케이션 루프
+      counter=0
+      while true; do
+        counter=$((counter + 1))
+        echo "작업 수행 중 #$counter: $(date)"
+        sleep 5
+      done
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: complex-lifecycle-demo
+  labels:
+    app: complex-lifecycle
+spec:
+  terminationGracePeriodSeconds: 90  # 복잡한 정리 작업을 위한 긴 시간
+  initContainers:
+  - name: init-setup
+    image: busybox:latest
+    command: ['sh', '-c']
+    args:
+    - |
+      echo "Init Container: 환경 설정 중..."
+      # 데이터베이스 마이그레이션 시뮬레이션
+      sleep 5
+      echo "Init Container: 설정 완료"
+  
+  containers:
+  - name: main-app
+    image: busybox:latest
+    command: ["/bin/sh"]
+    args:
+    - -c
+    - |
+      # 복잡한 애플리케이션 시뮬레이션
+      
+      # 시그널 핸들러
+      handle_term() {
+        echo "SIGTERM 수신: $(date)"
+        
+        # 1단계: 새 요청 거부
+        echo "1단계: 새 요청 거부 모드 활성화"
+        touch /tmp/no_new_requests
+        sleep 3
+        
+        # 2단계: 진행 중인 트랜잭션 완료
+        echo "2단계: 진행 중인 트랜잭션 완료 대기"
+        PENDING_TX=5
+        while [ $PENDING_TX -gt 0 ]; do
+          echo "  트랜잭션 $PENDING_TX 처리 중..."
+          sleep 2
+          PENDING_TX=$((PENDING_TX - 1))
+        done
+        
+        # 3단계: 데이터 영속화
+        echo "3단계: 메모리 데이터 영속화"
+        sleep 3
+        
+        # 4단계: 외부 서비스 연결 해제
+        echo "4단계: 외부 서비스 연결 해제"
+        sleep 2
+        
+        echo "Graceful shutdown 완료: $(date)"
+        exit 0
+      }
+      
+      trap handle_term TERM
+      
+      echo "복잡한 애플리케이션 시작: $(date)"
+      
+      # PostStart 완료 대기
+      while [ ! -f /tmp/initialized ]; do
+        echo "초기화 대기 중..."
+        sleep 1
+      done
+      
+      echo "애플리케이션 준비 완료!"
+      
+      # 메인 루프
+      while true; do
+        if [ -f /tmp/no_new_requests ]; then
+          echo "종료 모드: 새 요청 거부"
+        else
+          echo "정상 운영 중: $(date)"
+        fi
+        sleep 3
+      done
+    
+    lifecycle:
+      postStart:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - |
+            echo "PostStart: 복잡한 초기화 시작"
+            # 캐시 워밍업
+            echo "캐시 데이터 로드 중..."
+            sleep 5
+            # 외부 서비스 연결
+            echo "외부 서비스 연결 중..."
+            sleep 3
+            # 초기화 완료 마커
+            touch /tmp/initialized
+            echo "PostStart: 초기화 완료"
+      
+      preStop:
+        exec:
+          command:
+          - /bin/sh
+          - -c
+          - |
+            echo "PreStop: 종료 준비 시작"
+            # 모니터링 시스템에 알림
+            echo "모니터링 시스템에 종료 알림 전송..."
+            sleep 2
+            # 로그 수집기에 플러시 요청
+            echo "로그 플러시 요청..."
+            sleep 3
+            echo "PreStop: 종료 준비 완료, SIGTERM 대기"
+    
+    volumeMounts:
+    - name: tmp-volume
+      mountPath: /tmp
+  
+  volumes:
+  - name: tmp-volume
+    emptyDir: {}
