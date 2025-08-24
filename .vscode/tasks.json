@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Lint Current File",
+      "type": "shell",
+      "command": "trunk check ${file}",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "new",
+        "focus": true
+      },
+      "problemMatcher": {
+        "owner": "kube-linter",
+        "pattern": {
+          "regexp": "^(.+):(\\d+):(\\d+)\\s+(\\w+)\\s+(.+)\\s+(kube-linter/.+)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5,
+          "code": 6
+        }
+      }
+    },
+    {
+      "label": "Fix Current File",
+      "type": "shell",
+      "command": "trunk check --fix ${file}",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "Lint All Pattern Files",
+      "type": "shell",
+      "command": "trunk check ${workspaceFolder}/foundational/${input:pattern}/k8s/*.yaml",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      }
+    },
+    {
+      "label": "Show All Issues",
+      "type": "shell",
+      "command": "config_file=$(find '${fileDirname}' '${fileDirname}/..' '${fileDirname}/../..' -maxdepth 1 -name '.kube-linter.yaml' -o -name '.trunk/configs/.kube-linter.yaml' 2>/dev/null | head -1); if [ -n \"$config_file\" ]; then echo \"Using config: $config_file\"; kube_linter=$(find ~/.cache/trunk -name 'kube-linter' -type f 2>/dev/null | head -1); \"$kube_linter\" lint ${file} --config \"$config_file\"; else trunk check ${file} --show-existing; fi",
+      "presentation": {
+        "reveal": "always",
+        "panel": "new"
+      },
+      "problemMatcher": [
+        "$eslint-compact"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "pattern",
+      "type": "promptString",
+      "description": "Enter pattern name (e.g., declarative-deployment, managed-lifecycle)",
+      "default": "kube-pattern-name"
+    }
+  ]
+}

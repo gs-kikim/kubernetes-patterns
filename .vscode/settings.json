@@ -1,0 +1,32 @@
+{
+  "yaml.schemas": {
+    "kubernetes": [
+      "foundational/**/k8s/*.yaml",
+      "foundational/**/*.k8s.yaml",
+      "behavioral/**/k8s/*.yaml",
+      "structural/**/k8s/*.yaml",
+      "configuration/**/k8s/*.yaml",
+      "advanced/**/k8s/*.yaml"
+    ],
+    ".kube-linter.yaml": ["**/.kube-linter*.yaml"]
+  },
+  "yaml.validate": true,
+  "yaml.format.enable": true,
+  "editor.formatOnSave": true,
+  "files.associations": {
+    "*.yaml": "yaml",
+    "*.yml": "yaml"
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml",
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.autoIndent": "advanced"
+  },
+  "kubernetes.validate": true,
+  "kubernetes.kubeconfig": "${env:HOME}/.kube/config",
+  "files.exclude": {
+    "**/.trunk": true,
+    "**/.DS_Store": true
+  }
+}

@@ -1,0 +1,86 @@
+# Managed Lifecycle 패턴 전용 kube-linter 설정
+# Lifecycle hooks와 graceful shutdown에 집중
+
+checks:
+  addAllBuiltIn: true
+
+  # Lifecycle 패턴에서 필수 체크
+  include:
+    - no-liveness-probe # 컨테이너 상태 모니터링
+    - no-readiness-probe # 트래픽 수신 준비 확인
+    - mismatching-selector # 셀렉터 일치 확인
+    - writable-host-mount # 호스트 파일시스템 보호
+
+  # Lifecycle 패턴에서 유연하게 적용
+  exclude:
+    - minimum-three-replicas # 단일 인스턴스 테스트 허용
+    - unset-cpu-requirements # CPU는 선택사항
+    - required-annotation-email # 메타데이터는 선택사항
+    - drop-net-raw-capability # 디버깅 용도 허용
+
+customChecks:
+  # PreStop 후크 권장 (graceful shutdown)
+  - name: prestop-hook-configured
+    description: PreStop hook recommended for graceful shutdown
+    remediation: Add lifecycle.preStop with proper shutdown logic
+    scope:
+      objectKinds:
+        - DeploymentLike
+    template: required-annotation
+    params:
+      key: lifecycle/prestop-configured
+
+  # PostStart 후크 문서화
+  - name: poststart-hook-documented
+    description: PostStart hook should be documented if used
+    remediation: Document postStart hook behavior in annotations
+    scope:
+      objectKinds:
+        - DeploymentLike
+    template: required-annotation
+    params:
+      key: lifecycle/poststart-behavior
+
+  # TerminationGracePeriodSeconds 설정
+  - name: termination-grace-period
+    description: Must set appropriate terminationGracePeriodSeconds
+    remediation: Set terminationGracePeriodSeconds (30-60s recommended)
+    scope:
+      objectKinds:
+        - DeploymentLike
+    template: required-annotation
+    params:
+      key: lifecycle/termination-period
+
+  # SIGTERM 핸들러 구현 확인
+  - name: sigterm-handler
+    description: Application must handle SIGTERM properly
+    remediation: Implement SIGTERM handler for graceful shutdown
+    scope:
+      objectKinds:
+        - DeploymentLike
+    template: required-annotation
+    params:
+      key: lifecycle/sigterm-handler
+
+  # Init Container 사용시 문서화
+  - name: init-container-purpose
+    description: Init containers must have clear purpose
+    remediation: Document init container purpose in annotations
+    scope:
+      objectKinds:
+        - DeploymentLike
+    template: required-annotation
+    params:
+      key: lifecycle/init-purpose
+
+  # 종속성 대기 로직
+  - name: dependency-wait-strategy
+    description: Document how container waits for dependencies
+    remediation: Add annotation describing dependency wait strategy
+    scope:
+      objectKinds:
+        - DeploymentLike
+    template: required-annotation
+    params:
+      key: lifecycle/dependency-strategy

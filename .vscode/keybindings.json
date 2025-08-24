@@ -1,0 +1,25 @@
+[
+  {
+    "key": "cmd+k cmd+l",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Lint Current File",
+    "when": "resourceExtname == .yaml || resourceExtname == .yml"
+  },
+  {
+    "key": "cmd+k cmd+f",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Fix Current File",
+    "when": "resourceExtname == .yaml || resourceExtname == .yml"
+  },
+  {
+    "key": "cmd+k cmd+a",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Show All Issues",
+    "when": "resourceExtname == .yaml || resourceExtname == .yml"
+  },
+  {
+    "key": "cmd+k cmd+p",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Lint All Pattern Files"
+  }
+]

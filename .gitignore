@@ -1,3 +1,6 @@
 *-blog.md
 .claude/*
+*/.claude/*
+
 .trunk/*
+**/.trunk/*
