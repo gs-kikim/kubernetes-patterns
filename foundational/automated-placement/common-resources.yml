@@ -1,0 +1,62 @@
+# 공통 리소스 정의 (ServiceAccount, NetworkPolicy 등)
+---
+# ServiceAccount 생성
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: placement-sa
+  namespace: automated-placement
+  labels:
+    app: automated-placement
+---
+# NetworkPolicy - Pod 간 통신 제어
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: placement-network-policy
+  namespace: automated-placement
+spec:
+  podSelector:
+    matchLabels:
+      app: automated-placement
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # 같은 네임스페이스 내 Pod끼리 통신 허용
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: automated-placement
+    - podSelector: {}
+  # 외부에서 8080 포트 접근 허용
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 80
+  egress:
+  # DNS 해결을 위한 CoreDNS 접근 허용
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # 같은 네임스페이스 내 통신 허용
+  - to:
+    - podSelector: {}
+  # 외부 인터넷 접근 허용 (이미지 다운로드 등)
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80

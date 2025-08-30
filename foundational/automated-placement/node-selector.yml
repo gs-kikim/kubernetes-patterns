@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: automated-placement
+---
+# Node Selector 예제 - 가장 간단한 노드 선택 방법
+# SSD 디스크가 있는 노드에만 배치
+apiVersion: v1
+kind: Pod
+metadata:
+  name: node-selector-pod
+  namespace: automated-placement
+  labels:
+    app: node-selector-demo
+spec:
+  nodeSelector:
+    disktype: ssd
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 2000
+  containers:
+  - name: app
+    image: k8spatterns/random-generator:1.0
+    ports:
+    - containerPort: 8080
+    securityContext:
+      readOnlyRootFilesystem: false  # 앱이 로그 작성 필요
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    livenessProbe:
+      httpGet:
+        path: /actuator/health
+        port: 8080
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /actuator/health
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+---
+# 복수 레이블을 가진 Node Selector
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-selector-pod
+  namespace: automated-placement
+  labels:
+    app: multi-selector-demo
+spec:
+  nodeSelector:
+    disktype: ssd
+    environment: production
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101  # nginx user
+    fsGroup: 101
+  containers:
+  - name: app
+    image: nginx:1.24-alpine
+    ports:
+    - containerPort: 80
+    securityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+        add:
+        - NET_BIND_SERVICE
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 5
+    volumeMounts:
+    - name: cache
+      mountPath: /var/cache/nginx
+    - name: run
+      mountPath: /var/run
+  volumes:
+  - name: cache
+    emptyDir: {}
+  - name: run
+    emptyDir: {}

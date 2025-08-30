@@ -1,0 +1,421 @@
+# Topology Spread Constraints 예제
+# Pod를 토폴로지 도메인에 균등하게 분산
+
+# 기본 Topology Spread 예제
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zone-spread-app
+  namespace: automated-placement
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: zone-spread
+  template:
+    metadata:
+      labels:
+        app: zone-spread
+        tier: frontend
+    spec:
+      topologySpreadConstraints:
+      # Zone 레벨에서 균등 분산 (필수)
+      - maxSkew: 1  # 최대 불균형 허용치
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule  # 조건 충족 못하면 스케줄링 안함
+        labelSelector:
+          matchLabels:
+            app: zone-spread
+      # Node 레벨에서 균등 분산 (선호)
+      - maxSkew: 2
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway  # 조건 충족 못해도 스케줄링
+        labelSelector:
+          matchLabels:
+            app: zone-spread
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+      - name: app
+        image: k8spatterns/random-generator:1.0
+        ports:
+        - containerPort: 8080
+        securityContext:
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+# 복합 Topology Spread 예제 (Zone과 Node)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: distributed-db
+  namespace: automated-placement
+spec:
+  serviceName: db-service
+  replicas: 9
+  selector:
+    matchLabels:
+      app: distributed-db
+  template:
+    metadata:
+      labels:
+        app: distributed-db
+        tier: database
+    spec:
+      topologySpreadConstraints:
+      # Zone별로 최대한 균등하게 (3-3-3)
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: distributed-db
+      # 같은 Zone 내에서도 Node별로 분산
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: distributed-db
+      # Rack 레벨 분산 (데이터센터 환경)
+      - maxSkew: 2
+        topologyKey: topology.kubernetes.io/rack
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: distributed-db
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999  # cassandra user
+        fsGroup: 999
+      containers:
+      - name: database
+        image: cassandra:3.11.16
+        ports:
+        - containerPort: 9042
+        env:
+        - name: CASSANDRA_CLUSTER_NAME
+          value: "MyCluster"
+        securityContext:
+          readOnlyRootFilesystem: false  # Database needs write access
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        livenessProbe:
+          tcpSocket:
+            port: 9042
+          initialDelaySeconds: 90
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - "nodetool status | grep -E '^UN'"
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/cassandra
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+---
+# minDomains를 사용한 고급 Topology Spread
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ha-web-app
+  namespace: automated-placement
+spec:
+  replicas: 12
+  selector:
+    matchLabels:
+      app: ha-web
+  template:
+    metadata:
+      labels:
+        app: ha-web
+        tier: frontend
+        version: v2
+    spec:
+      topologySpreadConstraints:
+      # 최소 3개 Zone에 분산 (고가용성)
+      - maxSkew: 1
+        minDomains: 3  # 최소 3개 도메인 사용
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: ha-web
+      # Node 레벨 분산
+      - maxSkew: 2
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app: ha-web
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+      containers:
+      - name: web
+        image: nginx:1.24-alpine
+        ports:
+        - containerPort: 80
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: cache
+          mountPath: /var/cache/nginx
+        - name: run
+          mountPath: /var/run
+      volumes:
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+---
+# nodeAffinityPolicy와 nodeTaintsPolicy를 사용한 Topology Spread
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: advanced-spread
+  namespace: automated-placement
+spec:
+  replicas: 8
+  selector:
+    matchLabels:
+      app: advanced-spread
+  template:
+    metadata:
+      labels:
+        app: advanced-spread
+        workload: batch
+    spec:
+      # Node Affinity와 함께 사용
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node-type
+                operator: In
+                values: ["compute-optimized"]
+      topologySpreadConstraints:
+      # Zone 분산 (Node Affinity 고려)
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: advanced-spread
+        # nodeAffinityPolicy: Honor  # Node Affinity 규칙 준수 (v1.26+)
+        # nodeTaintsPolicy: Honor    # Taints 고려 (v1.26+)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+      - name: worker
+        image: k8spatterns/random-generator:1.0
+        env:
+        - name: WORKER_TYPE
+          value: "batch"
+        securityContext:
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+# 여러 앱 간의 Topology Spread 조정
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cache-layer
+  namespace: automated-placement
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: cache
+  template:
+    metadata:
+      labels:
+        app: cache
+        tier: middleware
+        shared-spread: "group-1"  # 공유 레이블
+    spec:
+      topologySpreadConstraints:
+      # 같은 그룹의 모든 Pod를 Zone별로 균등 분산
+      - maxSkew: 2
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            shared-spread: "group-1"  # 여러 앱이 공유하는 레이블
+      # Cache Pod끼리만 Node 분산
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: cache
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+      - name: redis
+        image: redis:6.2-alpine
+        ports:
+        - containerPort: 6379
+        securityContext:
+          readOnlyRootFilesystem: false
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        livenessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+# Service 정의
+apiVersion: v1
+kind: Service
+metadata:
+  name: zone-spread-service
+  namespace: automated-placement
+spec:
+  selector:
+    app: zone-spread
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-service
+  namespace: automated-placement
+spec:
+  clusterIP: None  # Headless service for StatefulSet
+  selector:
+    app: distributed-db
+  ports:
+  - port: 9042
+    targetPort: 9042
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ha-web-service
+  namespace: automated-placement
+spec:
+  selector:
+    app: ha-web
+  ports:
+  - port: 80
+    targetPort: 80
+  type: LoadBalancer

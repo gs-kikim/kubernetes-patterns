@@ -1,0 +1,348 @@
+# Pod Affinity/Anti-Affinity 예제
+# Redis와 웹 애플리케이션을 같은 노드에 배치하고, 웹 레플리카는 분산시키는 예제
+
+# Redis Cache 배포
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-cache
+  namespace: automated-placement
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: redis
+      tier: cache
+  template:
+    metadata:
+      labels:
+        app: redis
+        tier: cache
+    spec:
+      affinity:
+        # Redis 인스턴스끼리는 다른 노드에 배치 (Anti-Affinity)
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["redis"]
+              topologyKey: "kubernetes.io/hostname"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999 # redis user
+        fsGroup: 999
+      containers:
+        - name: redis
+          image: redis:6.2-alpine
+          ports:
+            - containerPort: 6379
+          securityContext:
+            readOnlyRootFilesystem: false # Redis needs write access
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+# Web Application 배포
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  namespace: automated-placement
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        app: web
+        tier: frontend
+    spec:
+      affinity:
+        # Pod Affinity: Redis와 같은 노드에 배치하려고 시도
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["redis"]
+                topologyKey: "kubernetes.io/hostname"
+        # Pod Anti-Affinity: 웹 앱끼리는 가능한 다른 노드에 분산
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["web"]
+                topologyKey: "kubernetes.io/hostname"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+        - name: web
+          image: k8spatterns/random-generator:1.0
+          ports:
+            - containerPort: 8080
+          env:
+            - name: REDIS_HOST
+              value: "redis-service.automated-placement.svc.cluster.local"
+          securityContext:
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+# Zone 기반 Pod Affinity 예제
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: database
+  namespace: automated-placement
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: database
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: database
+        tier: backend
+    spec:
+      affinity:
+        # 같은 Zone 내의 다른 데이터베이스 Pod와는 다른 노드에 배치 (고가용성)
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["database"]
+              topologyKey: "kubernetes.io/hostname"
+          # 다른 Zone에 가능한 분산 배치
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["database"]
+                topologyKey: "topology.kubernetes.io/zone"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999 # postgres user
+        fsGroup: 999
+      containers:
+        - name: postgres
+          image: postgres:13-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "myapp"
+            - name: POSTGRES_USER
+              value: "myuser"
+            - name: POSTGRES_PASSWORD
+              value: "mypassword"
+          securityContext:
+            readOnlyRootFilesystem: false # Database needs write access
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - myuser
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - myuser
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+# 복잡한 상호 의존성을 가진 마이크로서비스 예제
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: automated-placement
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+      tier: edge
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+        tier: edge
+    spec:
+      affinity:
+        # 필수: 웹 앱과 같은 Zone에 배치
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: tier
+                    operator: In
+                    values: ["frontend"]
+              topologyKey: "topology.kubernetes.io/zone"
+        # 선호: 데이터베이스와는 다른 노드에 배치 (리소스 격리)
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 75
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: tier
+                      operator: In
+                      values: ["backend"]
+                topologyKey: "kubernetes.io/hostname"
+          # 필수: API Gateway끼리는 다른 노드에 배치 (고가용성)
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: ["api-gateway"]
+              topologyKey: "kubernetes.io/hostname"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+      containers:
+        - name: gateway
+          image: nginx:1.24-alpine
+          ports:
+            - containerPort: 80
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
+      volumes:
+        - name: cache
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+---
+# Service 정의
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: automated-placement
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  namespace: automated-placement
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: LoadBalancer
