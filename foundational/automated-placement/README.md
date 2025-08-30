@@ -1,4 +1,4 @@
-# Kubernetes Patterns - Chapter 6: Automated Placement
+# Kubernetes Pattern: Automated Placement
 
 이 디렉토리는 쿠버네티스 패턴 6장 "Automated Placement"의 실습 예제를 포함합니다.
 
@@ -7,6 +7,7 @@
 Automated Placement 패턴은 쿠버네티스에서 Pod를 노드에 효율적으로 배치하기 위한 다양한 전략을 다룹니다.
 
 ### 주요 개념
+
 - **Node Selector**: 간단한 라벨 기반 노드 선택
 - **Node Affinity**: 더 유연한 노드 선택 규칙
 - **Pod Affinity/Anti-Affinity**: Pod 간 관계 기반 배치
@@ -37,6 +38,7 @@ automated-placement/
 ```
 
 이 스크립트는:
+
 - 3개 노드를 가진 클러스터 생성
 - 각 노드에 테스트용 라벨 추가
 - Zone, Rack 등의 토폴로지 라벨 설정
@@ -71,6 +73,7 @@ kubectl apply -f topology-spread.yml
 ## 📝 예제 설명
 
 ### Node Selector
+
 가장 기본적인 노드 선택 방법으로, 노드 라벨과 정확히 일치하는 조건을 사용합니다.
 
 ```yaml
@@ -80,7 +83,9 @@ nodeSelector:
 ```
 
 ### Node Affinity
+
 더 복잡한 표현식을 사용한 유연한 노드 선택:
+
 - `requiredDuringSchedulingIgnoredDuringExecution`: 필수 조건
 - `preferredDuringSchedulingIgnoredDuringExecution`: 선호 조건
 
@@ -96,7 +101,9 @@ affinity:
 ```
 
 ### Pod Affinity/Anti-Affinity
+
 Pod 간의 관계를 기반으로 배치를 결정:
+
 - **Pod Affinity**: 특정 Pod와 같은 위치에 배치
 - **Pod Anti-Affinity**: 특정 Pod와 다른 위치에 배치
 
@@ -113,6 +120,7 @@ affinity:
 ```
 
 ### Taints and Tolerations
+
 노드를 특정 워크로드 전용으로 예약:
 
 ```bash
@@ -123,6 +131,7 @@ kubectl taint nodes node1 gpu=true:NoSchedule
 ```
 
 ### Topology Spread Constraints
+
 Pod를 토폴로지 도메인에 균등하게 분산:
 
 ```yaml
@@ -138,20 +147,24 @@ topologySpreadConstraints:
 ## 🧪 테스트 시나리오
 
 ### 시나리오 1: 고가용성 웹 애플리케이션
+
 - Redis 캐시와 웹 서버를 같은 노드에 배치 (네트워크 레이턴시 최소화)
 - 웹 서버 레플리카는 다른 노드에 분산 (고가용성)
 
 ### 시나리오 2: 멀티존 데이터베이스
+
 - 데이터베이스를 여러 존에 분산 배치
 - 같은 존 내에서도 노드별로 분산
 
 ### 시나리오 3: GPU 워크로드
+
 - GPU가 있는 노드에만 ML 워크로드 배치
 - Taint와 Toleration으로 GPU 노드 격리
 
 ## 🔒 보안 및 린팅 설정
 
 ### kube-linter 설정
+
 프로젝트에는 커스텀 `.kube-linter.yaml` 설정이 포함되어 있습니다:
 
 ```bash
@@ -161,17 +174,6 @@ kube-linter lint *.yml --config .kube-linter.yaml
 # 개별 파일 검사
 kube-linter lint node-affinity.yml --config .kube-linter.yaml
 ```
-
-### 추가된 보안 설정
-
-1. **ServiceAccount**: 각 Pod에 전용 ServiceAccount 사용
-2. **NetworkPolicy**: Pod 간 네트워크 통신 제어
-3. **Security Context**: 비특권 사용자로 실행
-4. **Resource Limits**: CPU/Memory 제한 설정
-5. **Health Probes**: Liveness/Readiness 프로브 설정
-6. **DNS Config**: DNS 해결 최적화
-7. **Restart Policy**: 장애 복구 정책
-8. **Deployment Strategy**: Rolling Update 전략
 
 ### 프로덕션 권장사항
 
@@ -188,6 +190,7 @@ kubectl apply -f node-affinity.yml
 ## 🔍 모니터링 및 디버깅
 
 ### Pod 배치 확인
+
 ```bash
 # Pod가 어느 노드에 배치되었는지 확인
 kubectl get pods -n automated-placement -o wide
@@ -200,6 +203,7 @@ kubectl get pods -n automated-placement --field-selector status.phase=Pending
 ```
 
 ### 노드 정보 확인
+
 ```bash
 # 노드 라벨 확인
 kubectl get nodes --show-labels
@@ -219,7 +223,7 @@ kubectl get pods -A -o wide | awk '{print $8}' | sort | uniq -c
 
 3. **Topology Key**: `topologyKey`는 노드 라벨이어야 하며, 모든 노드에 해당 라벨이 있어야 합니다.
 
-4. **Hard vs Soft 제약**: 
+4. **Hard vs Soft 제약**:
    - Hard (`required`): 반드시 충족해야 함
    - Soft (`preferred`): 가능하면 충족
 
