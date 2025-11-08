@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-downward-demo
+  labels:
+    app: random-generator
+    version: "2.0"
+    environment: test
+    pattern: self-awareness
+  annotations:
+    description: "Self Awareness pattern - Volume-based metadata injection"
+    team: "platform-team"
+    build-id: "build-456"
+spec:
+  containers:
+  - name: random-generator
+    image: busybox:1.36
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "=== Self Awareness Pattern - Volume-based Metadata ==="
+      echo ""
+      echo "=== All Labels ==="
+      cat /etc/podinfo/labels
+      echo ""
+      echo "=== All Annotations ==="
+      cat /etc/podinfo/annotations
+      echo ""
+      echo "=== Individual Fields ==="
+      echo "Pod Name: $(cat /etc/podinfo/pod-name)"
+      echo "Namespace: $(cat /etc/podinfo/pod-namespace)"
+      echo "Pod UID: $(cat /etc/podinfo/pod-uid)"
+      echo ""
+      echo "=== Pod IP and Node (from env vars) ==="
+      echo "Pod IP: $POD_IP"
+      echo "Node Name: $NODE_NAME"
+      echo ""
+      echo "=== Resource Information ==="
+      echo "CPU Limit: $(cat /etc/resources/cpu_limit) milliCPU"
+      echo "Memory Limit: $(cat /etc/resources/mem_limit) MB"
+      echo "CPU Request: $(cat /etc/resources/cpu_request) milliCPU"
+      echo "Memory Request: $(cat /etc/resources/mem_request) MB"
+      echo ""
+      echo "Keeping container running for 1 hour..."
+      sleep 3600
+
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+    env:
+    # Pod IP and Node Name can only be accessed via environment variables
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+
+    volumeMounts:
+    - name: podinfo
+      mountPath: /etc/podinfo
+      readOnly: true
+    - name: resources
+      mountPath: /etc/resources
+      readOnly: true
+
+  volumes:
+  - name: podinfo
+    downwardAPI:
+      items:
+      # All labels as a file
+      - path: "labels"
+        fieldRef:
+          fieldPath: metadata.labels
+
+      # All annotations as a file
+      - path: "annotations"
+        fieldRef:
+          fieldPath: metadata.annotations
+
+      # Individual metadata fields (only these are supported for volumes)
+      - path: "pod-name"
+        fieldRef:
+          fieldPath: metadata.name
+
+      - path: "pod-namespace"
+        fieldRef:
+          fieldPath: metadata.namespace
+
+      - path: "pod-uid"
+        fieldRef:
+          fieldPath: metadata.uid
+
+  - name: resources
+    downwardAPI:
+      items:
+      - path: "cpu_limit"
+        resourceFieldRef:
+          containerName: random-generator
+          resource: limits.cpu
+          divisor: "1m"
+
+      - path: "mem_limit"
+        resourceFieldRef:
+          containerName: random-generator
+          resource: limits.memory
+          divisor: "1Mi"
+
+      - path: "cpu_request"
+        resourceFieldRef:
+          containerName: random-generator
+          resource: requests.cpu
+          divisor: "1m"
+
+      - path: "mem_request"
+        resourceFieldRef:
+          containerName: random-generator
+          resource: requests.memory
+          divisor: "1Mi"

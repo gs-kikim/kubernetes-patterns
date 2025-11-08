@@ -1,0 +1,209 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-aware
+  labels:
+    app: multi-container-demo
+    pattern: self-awareness
+  annotations:
+    description: "Multi-container Pod with shared awareness"
+spec:
+  containers:
+  # Main application container
+  - name: main-app
+    image: nginx:1.25-alpine
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "500m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+    volumeMounts:
+    - name: shared-info
+      mountPath: /etc/shared
+      readOnly: true
+    - name: nginx-config
+      mountPath: /etc/nginx/nginx.conf
+      subPath: nginx.conf
+
+  # Monitoring sidecar that knows about main container resources
+  - name: monitor
+    image: busybox:1.36
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "=== Monitoring Sidecar Started ==="
+      echo ""
+      echo "Pod Information:"
+      echo "  Pod Name: $(cat /etc/shared/pod-name)"
+      echo "  Namespace: $(cat /etc/shared/namespace)"
+      echo "  Node: $NODE_NAME"
+      echo ""
+      echo "Main Application Resources:"
+      echo "  Memory Limit: $(cat /etc/resources/main-mem-limit) MB"
+      echo "  CPU Limit: $(cat /etc/resources/main-cpu-limit) milliCPU"
+      echo ""
+      echo "Monitor Sidecar Resources:"
+      echo "  Memory Limit: $(cat /etc/resources/monitor-mem-limit) MB"
+      echo "  CPU Limit: $(cat /etc/resources/monitor-cpu-limit) milliCPU"
+      echo ""
+      echo "Total Pod Resources:"
+      TOTAL_MEM=$(($(cat /etc/resources/main-mem-limit) + $(cat /etc/resources/monitor-mem-limit)))
+      TOTAL_CPU=$(($(cat /etc/resources/main-cpu-limit) + $(cat /etc/resources/monitor-cpu-limit)))
+      echo "  Total Memory: ${TOTAL_MEM} MB"
+      echo "  Total CPU: ${TOTAL_CPU} milliCPU"
+      echo ""
+      echo "Monitoring metrics every 10 seconds..."
+      echo ""
+
+      while true; do
+        sleep 10
+        echo "[$(date '+%H:%M:%S')] Monitoring main-app (Pod: $(cat /etc/shared/pod-name))"
+      done
+
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+    env:
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+
+    volumeMounts:
+    - name: shared-info
+      mountPath: /etc/shared
+      readOnly: true
+    - name: resources
+      mountPath: /etc/resources
+      readOnly: true
+
+  # Init container that prepares nginx config based on resources
+  initContainers:
+  - name: config-generator
+    image: busybox:1.36
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "Generating nginx configuration based on resources..."
+
+      WORKERS=$((${CPU_LIMIT} / 1000))
+      if [ $WORKERS -lt 1 ]; then
+        WORKERS=1
+      fi
+
+      cat > /config/nginx.conf <<EOF
+      user nginx;
+      worker_processes ${WORKERS};
+      error_log /var/log/nginx/error.log warn;
+      pid /var/run/nginx.pid;
+
+      events {
+          worker_connections 1024;
+      }
+
+      http {
+          include /etc/nginx/mime.types;
+          default_type application/octet-stream;
+
+          log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                          '\$status \$body_bytes_sent "\$http_referer" '
+                          '"\$http_user_agent" "Pod: ${POD_NAME}"';
+
+          access_log /var/log/nginx/access.log main;
+          sendfile on;
+          keepalive_timeout 65;
+
+          server {
+              listen 80;
+              server_name localhost;
+
+              location / {
+                  root /usr/share/nginx/html;
+                  index index.html;
+              }
+
+              location /info {
+                  default_type application/json;
+                  return 200 '{"pod":"${POD_NAME}","node":"${NODE_NAME}","workers":${WORKERS}}';
+              }
+          }
+      }
+      EOF
+
+      echo "Configuration generated with ${WORKERS} worker processes"
+      cat /config/nginx.conf
+
+    env:
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+    - name: CPU_LIMIT
+      valueFrom:
+        resourceFieldRef:
+          containerName: main-app
+          resource: limits.cpu
+          divisor: "1m"
+
+    volumeMounts:
+    - name: nginx-config
+      mountPath: /config
+
+  volumes:
+  # Shared pod information
+  - name: shared-info
+    downwardAPI:
+      items:
+      - path: "pod-name"
+        fieldRef:
+          fieldPath: metadata.name
+      - path: "namespace"
+        fieldRef:
+          fieldPath: metadata.namespace
+      - path: "labels"
+        fieldRef:
+          fieldPath: metadata.labels
+
+  # Resource information for all containers
+  - name: resources
+    downwardAPI:
+      items:
+      # Main app resources
+      - path: "main-mem-limit"
+        resourceFieldRef:
+          containerName: main-app
+          resource: limits.memory
+          divisor: "1Mi"
+      - path: "main-cpu-limit"
+        resourceFieldRef:
+          containerName: main-app
+          resource: limits.cpu
+          divisor: "1m"
+      # Monitor resources
+      - path: "monitor-mem-limit"
+        resourceFieldRef:
+          containerName: monitor
+          resource: limits.memory
+          divisor: "1Mi"
+      - path: "monitor-cpu-limit"
+        resourceFieldRef:
+          containerName: monitor
+          resource: limits.cpu
+          divisor: "1m"
+
+  # EmptyDir for nginx config
+  - name: nginx-config
+    emptyDir: {}

@@ -1,0 +1,184 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-aware-app
+  labels:
+    app: resource-tuner
+    pattern: self-awareness
+  annotations:
+    description: "Demonstrates resource-aware application tuning"
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "=== Self Awareness Pattern - Resource-Aware Application ==="
+      echo ""
+      echo "This application auto-tunes based on resource limits"
+      echo ""
+      echo "Resource Configuration:"
+      echo "  Memory Limit: ${MEMORY_LIMIT_MB} MB"
+      echo "  CPU Limit: ${CPU_LIMIT_MILLICORES} milliCPU"
+      echo "  Memory Request: ${MEMORY_REQUEST_MB} MB"
+      echo "  CPU Request: ${CPU_REQUEST_MILLICORES} milliCPU"
+      echo ""
+
+      # Calculate optimal settings based on resources
+      # Example: Worker threads based on CPU
+      if [ $CPU_LIMIT_MILLICORES -ge 1000 ]; then
+        WORKERS=$(($CPU_LIMIT_MILLICORES / 1000))
+      else
+        WORKERS=1
+      fi
+
+      # Example: Cache size based on memory (use 25% of available memory)
+      CACHE_SIZE_MB=$(($MEMORY_LIMIT_MB * 25 / 100))
+
+      # Example: Connection pool size
+      CONN_POOL_SIZE=$(($MEMORY_LIMIT_MB / 32))
+      if [ $CONN_POOL_SIZE -lt 10 ]; then
+        CONN_POOL_SIZE=10
+      fi
+      if [ $CONN_POOL_SIZE -gt 100 ]; then
+        CONN_POOL_SIZE=100
+      fi
+
+      echo "Calculated Application Settings:"
+      echo "  Worker Threads: $WORKERS"
+      echo "  Cache Size: ${CACHE_SIZE_MB} MB"
+      echo "  Connection Pool Size: $CONN_POOL_SIZE"
+      echo ""
+
+      # Simulate application startup with calculated settings
+      echo "Starting application with optimized settings..."
+      echo "  [Config] workers=$WORKERS"
+      echo "  [Config] cache_size_mb=$CACHE_SIZE_MB"
+      echo "  [Config] max_connections=$CONN_POOL_SIZE"
+      echo ""
+      echo "Application running... (keeping container alive for 1 hour)"
+      sleep 3600
+
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "250m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+
+    env:
+    # Memory resources
+    - name: MEMORY_LIMIT_MB
+      valueFrom:
+        resourceFieldRef:
+          resource: limits.memory
+          divisor: "1Mi"
+
+    - name: MEMORY_REQUEST_MB
+      valueFrom:
+        resourceFieldRef:
+          resource: requests.memory
+          divisor: "1Mi"
+
+    # CPU resources
+    - name: CPU_LIMIT_MILLICORES
+      valueFrom:
+        resourceFieldRef:
+          resource: limits.cpu
+          divisor: "1m"
+
+    - name: CPU_REQUEST_MILLICORES
+      valueFrom:
+        resourceFieldRef:
+          resource: requests.cpu
+          divisor: "1m"
+
+    # Pod identification for logging
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+
+---
+# Example with different resource limits
+apiVersion: v1
+kind: Pod
+metadata:
+  name: resource-aware-app-large
+  labels:
+    app: resource-tuner
+    size: large
+  annotations:
+    description: "Same app with larger resource limits"
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "=== Resource-Aware Application (Large Configuration) ==="
+      echo ""
+      echo "Resource Configuration:"
+      echo "  Memory Limit: ${MEMORY_LIMIT_MB} MB"
+      echo "  CPU Limit: ${CPU_LIMIT_MILLICORES} milliCPU"
+      echo ""
+
+      # Same calculation logic
+      if [ $CPU_LIMIT_MILLICORES -ge 1000 ]; then
+        WORKERS=$(($CPU_LIMIT_MILLICORES / 1000))
+      else
+        WORKERS=1
+      fi
+
+      CACHE_SIZE_MB=$(($MEMORY_LIMIT_MB * 25 / 100))
+
+      CONN_POOL_SIZE=$(($MEMORY_LIMIT_MB / 32))
+      if [ $CONN_POOL_SIZE -lt 10 ]; then
+        CONN_POOL_SIZE=10
+      fi
+      if [ $CONN_POOL_SIZE -gt 100 ]; then
+        CONN_POOL_SIZE=100
+      fi
+
+      echo "Calculated Application Settings:"
+      echo "  Worker Threads: $WORKERS (more workers for larger CPU)"
+      echo "  Cache Size: ${CACHE_SIZE_MB} MB (larger cache for more memory)"
+      echo "  Connection Pool Size: $CONN_POOL_SIZE"
+      echo ""
+      echo "Note: Same application auto-tuned for larger resources!"
+      echo ""
+      sleep 3600
+
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "1000m"
+      limits:
+        memory: "2Gi"
+        cpu: "2000m"
+
+    env:
+    - name: MEMORY_LIMIT_MB
+      valueFrom:
+        resourceFieldRef:
+          resource: limits.memory
+          divisor: "1Mi"
+
+    - name: CPU_LIMIT_MILLICORES
+      valueFrom:
+        resourceFieldRef:
+          resource: limits.cpu
+          divisor: "1m"
+
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
