@@ -1,0 +1,27 @@
+graph TB
+    subgraph "Pod: Multi-Format App"
+        App[Application] -->|write| LogFile["/var/log/app<br/>application.log"]
+
+        subgraph "Fluent Bit Adapter"
+            FB[Fluent Bit]
+            P1[Parser: Apache]
+            P2[Parser: Custom]
+            P3[Parser: Syslog]
+            P4[Parser: CSV]
+
+            FB --> P1
+            FB --> P2
+            FB --> P3
+            FB --> P4
+        end
+
+        LogFile -->|tail & parse| FB
+    end
+
+    P1 -->|JSON| ELK[ELK Stack]
+    P2 -->|JSON| ELK
+    P3 -->|JSON| ELK
+    P4 -->|JSON| ELK
+
+    style FB fill:#ffd700
+    style LogFile fill:#90ee90

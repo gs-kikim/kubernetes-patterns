@@ -1,0 +1,30 @@
+# ClusterRoleBinding: bind app-sa to view-nodes (cluster-wide)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: app-sa-view-nodes
+subjects:
+- kind: ServiceAccount
+  name: app-sa
+  namespace: rbac-test
+roleRef:
+  kind: ClusterRole
+  name: view-nodes
+  apiGroup: rbac.authorization.k8s.io
+---
+# RoleBinding referencing ClusterRole (namespace-scoped)
+# This allows app-sa to view pods in rbac-test-2 namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: view-pods-binding
+  namespace: rbac-test-2
+subjects:
+- kind: ServiceAccount
+  name: app-sa
+  namespace: rbac-test
+roleRef:
+  kind: ClusterRole
+  name: view-pods
+  apiGroup: rbac.authorization.k8s.io

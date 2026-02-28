@@ -1,0 +1,27 @@
+# Test: fsGroup 설정
+# 목적: 볼륨 파일의 그룹 소유권 설정 검증
+# 예상 결과: 볼륨 마운트 경로의 파일이 지정된 GID로 소유됨
+# 검증: kubectl exec fs-group-test -- ls -ld /data (그룹이 3000이어야 함)
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fs-group-test
+  labels:
+    test: security-context
+    scenario: fs-group
+spec:
+  securityContext:
+    fsGroup: 3000        # 볼륨의 그룹 ID를 3000으로 설정
+    runAsUser: 1000
+    runAsNonRoot: true
+  containers:
+  - name: busybox
+    image: busybox:1.36
+    command: ['sh', '-c', 'echo "test" > /data/test.txt && sleep 3600']
+    volumeMounts:
+    - name: shared-data
+      mountPath: /data
+  volumes:
+  - name: shared-data
+    emptyDir: {}

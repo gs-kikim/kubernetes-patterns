@@ -1,0 +1,193 @@
+# 3-Tier Network Policies
+# Complete network segmentation for a 3-tier application.
+#
+# Traffic Flow (allowed paths):
+#   Internet/Ingress -> Frontend (80)
+#   Frontend -> Backend (8080)
+#   Backend -> Database (5432)
+#
+# All other paths are blocked.
+#
+# Usage:
+#   kubectl apply -f 06-3tier-networkpolicies.yaml
+---
+# 1. Default Deny All - Baseline security
+# Block all traffic by default, then allow specific paths
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+  annotations:
+    description: "Deny all ingress and egress traffic by default"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# 2. Allow DNS for all pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: production
+  annotations:
+    description: "Allow DNS queries for service discovery"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# 3. Frontend Policy
+# - Ingress: Allow from anywhere (simulating ingress controller)
+# - Egress: Only to Backend (random-generator) on port 8080
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-policy
+  namespace: production
+  annotations:
+    description: "Frontend: Allow ingress from anywhere, egress only to backend"
+spec:
+  podSelector:
+    matchLabels:
+      tier: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from anywhere (ingress controller, load balancer, etc.)
+    - ports:
+        - protocol: TCP
+          port: 80
+  egress:
+    # Allow to Backend only
+    - to:
+        - podSelector:
+            matchLabels:
+              tier: backend
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# 4. Backend Policy
+# - Ingress: Only from Frontend
+# - Egress: Only to Database
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-policy
+  namespace: production
+  annotations:
+    description: "Backend: Allow ingress from frontend, egress only to database"
+spec:
+  podSelector:
+    matchLabels:
+      tier: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from Frontend only
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: frontend
+        # Also allow from pods with role: random-client (for testing)
+        - podSelector:
+            matchLabels:
+              role: random-client
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Allow Prometheus scraping from monitoring namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+          podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090
+  egress:
+    # Allow to Database only
+    - to:
+        - podSelector:
+            matchLabels:
+              tier: database
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# 5. Database Policy
+# - Ingress: Only from Backend
+# - Egress: None (database doesn't need external connections)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-policy
+  namespace: production
+  annotations:
+    description: "Database: Allow ingress only from backend, no egress"
+spec:
+  podSelector:
+    matchLabels:
+      tier: database
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from Backend only
+    - from:
+        - podSelector:
+            matchLabels:
+              tier: backend
+      ports:
+        - protocol: TCP
+          port: 5432
+  # No egress rules = all egress blocked (along with policyTypes: Egress)
+  egress: []
+
+---
+# 6. Test Client Policy
+# - Allows curl-client-labeled to access backend
+# - curl-client (no label) remains blocked by default-deny
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: test-client-policy
+  namespace: production
+  annotations:
+    description: "Allow labeled test clients to access backend"
+spec:
+  podSelector:
+    matchLabels:
+      role: random-client
+  policyTypes:
+    - Egress
+  egress:
+    # Allow to Backend
+    - to:
+        - podSelector:
+            matchLabels:
+              tier: backend
+      ports:
+        - protocol: TCP
+          port: 8080

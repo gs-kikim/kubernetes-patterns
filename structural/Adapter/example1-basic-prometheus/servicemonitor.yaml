@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: random-generator
+  labels:
+    app: random-generator
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: random-generator
+  endpoints:
+  - port: metrics
+    interval: 15s
+    path: /metrics
+    scheme: http

@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluent-bit-config
+  labels:
+    app: multi-format-app
+data:
+  fluent-bit.conf: |
+    [SERVICE]
+        Flush         5
+        Daemon        off
+        Log_Level     info
+        Parsers_File  parsers.conf
+
+    [INPUT]
+        Name              tail
+        Path              /var/log/app/application.log
+        Tag               app.logs
+        Refresh_Interval  5
+        Skip_Long_Lines   On
+        DB                /tmp/fluent-bit-tail.db
+
+    [FILTER]
+        Name          modify
+        Match         app.logs
+        Add           app_name multi-format-app
+        Add           environment production
+
+    [OUTPUT]
+        Name          stdout
+        Match         app.logs
+        Format        json_lines
+
+  parsers.conf: |
+    [PARSER]
+        Name        apache
+        Format      regex
+        Regex       ^(?<host>[^ ]*) [^ ]* (?<user>[^ ]*) \[(?<time>[^\]]*)\] "(?<method>\S+)(?: +(?<path>[^\"]*?)(?: +\S*)?)?" (?<status>[^ ]*) (?<size>[^ ]*)$
+        Time_Key    time
+        Time_Format %d/%b/%Y:%H:%M:%S %z
+        Types       status:integer
+
+    [PARSER]
+        Name        custom
+        Format      regex
+        Regex       ^\[(?<time>[^\]]+)\] (?<level>\w+): (?<message>[^|]+) \| status=(?<status>\d+) \| duration=(?<duration>[\d.]+)ms$
+        Time_Key    time
+        Time_Format %Y-%m-%d %H:%M:%S
+        Types       status:integer duration:float
+
+    [PARSER]
+        Name        syslog
+        Format      regex
+        Regex       ^(?<time>[^ ]+ [^ ]+ [^ ]+) (?<host>[^ ]+) (?<ident>[^ ]+): Request status=(?<status>\d+) duration=(?<duration>[\d.]+)ms$
+        Time_Key    time
+        Time_Format %b %d %H:%M:%S
+        Types       status:integer duration:float
+
+    [PARSER]
+        Name        csv
+        Format      regex
+        Regex       ^(?<time>[^,]+),(?<level>[^,]+),(?<status>\d+),(?<duration>[\d.]+)$
+        Time_Key    time
+        Time_Format %Y-%m-%dT%H:%M:%S
+        Types       status:integer duration:float
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-format-app
+  labels:
+    app: multi-format-app
+    pattern: adapter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multi-format-app
+  template:
+    metadata:
+      labels:
+        app: multi-format-app
+        pattern: adapter
+    spec:
+      containers:
+      # Main Application - Writes logs in multiple formats
+      - name: app
+        image: k8spatterns/multi-format-app:1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: LOG_FILE
+          value: /var/log/app/application.log
+        - name: PORT
+          value: "8080"
+        volumeMounts:
+        - name: log-volume
+          mountPath: /var/log/app
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+      # Adapter Container - Fluent Bit log processor
+      - name: log-adapter
+        image: fluent/fluent-bit:2.2-distroless
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: log-volume
+          mountPath: /var/log/app
+          readOnly: true
+        - name: fluent-bit-config
+          mountPath: /fluent-bit/etc/
+          readOnly: true
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+
+      volumes:
+      - name: log-volume
+        emptyDir:
+          sizeLimit: 100Mi
+      - name: fluent-bit-config
+        configMap:
+          name: fluent-bit-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multi-format-app
+  labels:
+    app: multi-format-app
+spec:
+  type: ClusterIP
+  selector:
+    app: multi-format-app
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080

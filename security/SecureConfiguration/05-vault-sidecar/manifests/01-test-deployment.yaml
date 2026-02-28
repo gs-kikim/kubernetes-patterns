@@ -1,0 +1,60 @@
+# Vault Agent Sidecar Injector를 사용하는 Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-sidecar-test
+  namespace: vault-sidecar-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-test
+  template:
+    metadata:
+      labels:
+        app: vault-test
+      annotations:
+        # Vault Agent Injection 활성화
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "myapp"
+
+        # Secret 파일 경로 지정
+        vault.hashicorp.com/agent-inject-secret-database.txt: "secret/data/database"
+
+        # 템플릿으로 원하는 형식 지정
+        vault.hashicorp.com/agent-inject-template-database.txt: |
+          {{- with secret "secret/data/database" -}}
+          DB_USERNAME={{ .Data.data.username }}
+          DB_PASSWORD={{ .Data.data.password }}
+          CONNECTION_STRING={{ .Data.data.connection_string }}
+          {{- end -}}
+
+        # API 키도 추가
+        vault.hashicorp.com/agent-inject-secret-api.txt: "secret/data/myapp"
+        vault.hashicorp.com/agent-inject-template-api.txt: |
+          {{- with secret "secret/data/myapp" -}}
+          API_KEY={{ .Data.data.api_key }}
+          {{- end -}}
+    spec:
+      serviceAccountName: myapp-sa
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "=== Vault Sidecar 주입 확인 ==="
+              echo "마운트된 Secret 파일:"
+              ls -la /vault/secrets/
+              echo ""
+              echo "=== database.txt 내용 ==="
+              cat /vault/secrets/database.txt
+              echo ""
+              echo "=== api.txt 내용 ==="
+              cat /vault/secrets/api.txt
+              echo ""
+              echo "=== 30초마다 Secret 확인 (자동 갱신 테스트) ==="
+              while true; do
+                echo "$(date): Secrets are fresh"
+                sleep 30
+              done

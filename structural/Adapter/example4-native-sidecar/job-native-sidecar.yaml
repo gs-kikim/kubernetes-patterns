@@ -1,0 +1,87 @@
+# Native Sidecar (SOLUTION: Job completes properly)
+# Requires Kubernetes 1.28+ with SidecarContainers feature gate (Beta in 1.29+)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-job-native-sidecar
+  labels:
+    app: batch-job
+    type: native-sidecar
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: batch-job
+        type: native-sidecar
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9889"
+        prometheus.io/path: "/metrics"
+    spec:
+      restartPolicy: OnFailure
+
+      # Native Sidecar defined in initContainers with restartPolicy: Always
+      initContainers:
+      - name: metrics-adapter
+        image: k8spatterns/metrics-adapter:1.0
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always  # This makes it a Native Sidecar!
+        ports:
+        - containerPort: 9889
+          name: metrics
+        env:
+        - name: METRICS_FILE
+          value: /data/metrics.json
+        - name: METRICS_PORT
+          value: "9889"
+        volumeMounts:
+        - name: shared-data
+          mountPath: /data
+          readOnly: true
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+        # Startup probe indicates when sidecar is ready
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9889
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          failureThreshold: 15
+        # Liveness probe to restart if unhealthy
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9889
+          periodSeconds: 10
+
+      containers:
+      # Main Job Container
+      - name: batch-processor
+        image: k8spatterns/batch-job:1.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: METRICS_FILE
+          value: /data/metrics.json
+        - name: TOTAL_ITEMS
+          value: "50"
+        volumeMounts:
+        - name: shared-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+
+      volumes:
+      - name: shared-data
+        emptyDir: {}

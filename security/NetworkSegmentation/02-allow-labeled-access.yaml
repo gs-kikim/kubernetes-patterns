@@ -1,0 +1,71 @@
+# Allow Labeled Access NetworkPolicy
+# This policy allows access to the random-generator app only from pods
+# with the label "role: random-client"
+#
+# This demonstrates the principle of least privilege:
+# - Only pods explicitly labeled as clients can access the service
+# - All other pods are blocked (by the deny-all policy)
+#
+# Usage:
+#   kubectl apply -f 02-allow-labeled-access.yaml
+#
+# Test (should fail - no label):
+#   kubectl run curl-test --image=curlimages/curl -n production --rm -it --restart=Never -- \
+#     curl -s --connect-timeout 3 random-generator:8080
+#
+# Test (should succeed - has label):
+#   kubectl run curl-client --labels=role=random-client --image=curlimages/curl -n production --rm -it --restart=Never -- \
+#     curl -s --connect-timeout 3 random-generator:8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-access-to-random-generator
+  namespace: production
+  annotations:
+    description: "Allow access to random-generator from pods with role=random-client label"
+spec:
+  # This policy applies to pods with app=random-generator label
+  podSelector:
+    matchLabels:
+      app: random-generator
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow traffic from pods with role=random-client label
+    - from:
+        - podSelector:
+            matchLabels:
+              role: random-client
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# Alternative: Allow access from specific namespace
+# This shows cross-namespace access control
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-access
+  namespace: production
+  annotations:
+    description: "Allow Prometheus from monitoring namespace to scrape metrics"
+spec:
+  podSelector:
+    matchLabels:
+      has-metrics: "true"
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow from monitoring namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+          podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 9090

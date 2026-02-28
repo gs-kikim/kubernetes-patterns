@@ -1,0 +1,107 @@
+# Deployment with Native Sidecar
+# Shows proper startup ordering and lifecycle management
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-with-native-sidecar
+  labels:
+    app: native-sidecar-demo
+    pattern: adapter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: native-sidecar-demo
+  template:
+    metadata:
+      labels:
+        app: native-sidecar-demo
+        pattern: adapter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9889"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Native Sidecars in initContainers
+      initContainers:
+      - name: metrics-adapter
+        image: k8spatterns/metrics-adapter:1.0
+        imagePullPolicy: IfNotPresent
+        restartPolicy: Always  # Native Sidecar
+        ports:
+        - containerPort: 9889
+          name: metrics
+        env:
+        - name: METRICS_FILE
+          value: /data/metrics.json
+        - name: METRICS_PORT
+          value: "9889"
+        volumeMounts:
+        - name: shared-data
+          mountPath: /data
+          readOnly: true
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9889
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          failureThreshold: 10
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9889
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9889
+          periodSeconds: 10
+
+      containers:
+      # Main Application
+      - name: app
+        image: k8spatterns/batch-job:1.0
+        imagePullPolicy: IfNotPresent
+        command: ["python", "batch-job.py"]
+        env:
+        - name: METRICS_FILE
+          value: /data/metrics.json
+        - name: TOTAL_ITEMS
+          value: "1000000"  # Long-running for deployment
+        volumeMounts:
+        - name: shared-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+
+      volumes:
+      - name: shared-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: native-sidecar-demo
+  labels:
+    app: native-sidecar-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: native-sidecar-demo
+  ports:
+  - name: metrics
+    port: 9889
+    targetPort: 9889

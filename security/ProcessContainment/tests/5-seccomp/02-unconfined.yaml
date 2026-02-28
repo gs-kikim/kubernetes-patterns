@@ -1,0 +1,37 @@
+# Test: Unconfined Seccomp (제한 없음)
+# 목적: seccomp 비활성화 상태의 동작 이해
+# 경고: 프로덕션 환경에서는 사용하지 말 것!
+# 예상 결과: 모든 시스템 콜 허용
+# 테스트:
+#   kubectl exec seccomp-unconfined -- unshare --user true  # 성공
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: seccomp-unconfined
+  labels:
+    test: seccomp
+    scenario: unconfined
+    warning: dangerous
+spec:
+  securityContext:
+    runAsUser: 0  # root 사용자 (unshare 테스트용)
+    seccompProfile:
+      type: Unconfined  # seccomp 비활성화 (위험!)
+  containers:
+  - name: app
+    image: alpine:3.19
+    command:
+    - sh
+    - -c
+    - |
+      echo "=== Testing Unconfined Seccomp ==="
+      echo "All syscalls should be allowed..."
+
+      if unshare --user true 2>/dev/null; then
+        echo "SUCCESS: unshare syscall is allowed (no seccomp restrictions)"
+      else
+        echo "ERROR: unshare syscall is blocked (unexpected)"
+      fi
+
+      sleep 3600

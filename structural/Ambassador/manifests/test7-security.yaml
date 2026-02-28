@@ -1,0 +1,208 @@
+# Test 7: 리소스 격리 및 보안 테스트
+# Ambassador를 통한 보안 강화 검증
+# - 메인 컨테이너는 외부 직접 접근 불가
+# - Ambassador만 외부 통신 허용
+# - 리소스 제한 적용
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: security-test-config
+  labels:
+    test: ambassador-security
+data:
+  nginx.conf: |
+    events {
+        worker_connections 256;
+    }
+
+    http {
+        # 보안 헤더 추가
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+
+        # Rate limiting
+        limit_req_zone $binary_remote_addr zone=ambassador_limit:10m rate=10r/s;
+
+        server {
+            listen 8080;
+
+            # Health check
+            location /health {
+                access_log off;
+                return 200 'OK';
+            }
+
+            # Proxied endpoint with rate limiting
+            location /api {
+                limit_req zone=ambassador_limit burst=20 nodelay;
+
+                proxy_pass https://httpbin.org/get;
+                proxy_set_header Host httpbin.org;
+
+                # SSL/TLS settings
+                proxy_ssl_protocols TLSv1.2 TLSv1.3;
+                proxy_ssl_server_name on;
+
+                # Timeout settings
+                proxy_connect_timeout 5s;
+                proxy_read_timeout 10s;
+
+                # Hide backend errors
+                proxy_intercept_errors on;
+                error_page 502 503 504 = @error;
+            }
+
+            location @error {
+                return 503 '{"error": "Service temporarily unavailable"}';
+                add_header Content-Type application/json;
+            }
+        }
+    }
+
+---
+# NetworkPolicy: 메인 컨테이너의 외부 직접 접근 제한
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ambassador-network-policy
+  labels:
+    test: ambassador-security
+spec:
+  podSelector:
+    matchLabels:
+      test: ambassador-security
+  policyTypes:
+  - Egress
+  egress:
+  # DNS 허용
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Pod 내부 통신 허용 (localhost)
+  - to:
+    - podSelector:
+        matchLabels:
+          test: ambassador-security
+  # Ambassador 컨테이너만 외부 통신 허용 (이것은 시뮬레이션)
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: security-test
+  labels:
+    test: ambassador-security
+spec:
+  # 보안 컨텍스트 설정
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 2000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containers:
+  # 메인 애플리케이션 - 제한된 권한
+  - name: main
+    image: curlimages/curl:8.5.0
+    command:
+    - "/bin/sh"
+    - "-c"
+    - |
+      echo "=== Security Test Application ==="
+      echo "Main container has restricted permissions"
+      echo ""
+
+      # Ambassador가 준비될 때까지 대기
+      sleep 3
+
+      echo "Test 1: Direct external access (should fail with NetworkPolicy)"
+      echo "Attempting to reach httpbin.org directly..."
+      if timeout 5 curl -s https://httpbin.org/get > /dev/null 2>&1; then
+        echo "⚠ WARNING: Direct access succeeded (NetworkPolicy not enforced)"
+      else
+        echo "✓ PASS: Direct access blocked as expected"
+      fi
+      echo ""
+
+      echo "Test 2: Access via Ambassador (should succeed)"
+      echo "Attempting to reach external service via Ambassador..."
+      if curl -s -m 5 http://localhost:8080/api > /dev/null; then
+        echo "✓ PASS: Access via Ambassador succeeded"
+      else
+        echo "✗ FAIL: Ambassador access failed"
+      fi
+      echo ""
+
+      echo "Test 3: Resource limits verification"
+      echo "Checking container resource constraints..."
+      echo "This container is running with limited resources"
+      echo ""
+
+      # 계속 실행하면서 Ambassador를 통한 요청
+      counter=1
+      while [ $counter -le 5 ]; do
+        echo "=== Request #$counter at $(date) ==="
+        response=$(curl -s -w "\nStatus: %{http_code}\n" -m 5 http://localhost:8080/api 2>&1)
+        echo "$response"
+        echo ""
+        sleep 10
+        counter=$((counter + 1))
+      done
+
+      echo "Security tests completed"
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: false
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+      limits:
+        memory: "64Mi"
+        cpu: "100m"
+
+  # Ambassador - Nginx 프록시 (제한된 권한으로 실행)
+  - name: ambassador
+    image: nginx:1.25-alpine
+    ports:
+    - containerPort: 8080
+    volumeMounts:
+    - name: nginx-config
+      mountPath: /etc/nginx/nginx.conf
+      subPath: nginx.conf
+    - name: nginx-cache
+      mountPath: /var/cache/nginx
+    - name: nginx-run
+      mountPath: /var/run
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: false
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "200m"
+
+  volumes:
+  - name: nginx-config
+    configMap:
+      name: security-test-config
+  - name: nginx-cache
+    emptyDir: {}
+  - name: nginx-run
+    emptyDir: {}

@@ -1,0 +1,24 @@
+# Test: allowPrivilegeEscalation 차단
+# 목적: 권한 상승 방지 검증
+# 예상 결과: Pod 생성 성공, setuid 바이너리도 권한 상승 불가
+# 검증: NoNewPrivs 플래그가 설정되어야 함
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-privilege-escalation-test
+  labels:
+    test: security-context
+    scenario: no-privilege-escalation
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+  containers:
+  - name: busybox
+    image: busybox:1.36
+    command: ['sh', '-c', 'sleep 3600']
+    securityContext:
+      allowPrivilegeEscalation: false  # 권한 상승 차단
+      capabilities:
+        drop: ['ALL']

@@ -1,0 +1,15 @@
+# Test namespaces for RBAC testing
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbac-test
+  labels:
+    purpose: rbac-testing
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rbac-test-2
+  labels:
+    purpose: rbac-testing

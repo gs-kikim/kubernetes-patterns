@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir prometheus_client
+
+COPY prometheus-adapter.py .
+
+RUN chmod +x prometheus-adapter.py
+
+EXPOSE 9889
+
+CMD ["python", "prometheus-adapter.py"]

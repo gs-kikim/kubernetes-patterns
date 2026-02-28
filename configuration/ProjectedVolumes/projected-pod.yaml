@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-settings
+data:
+  app.conf: |
+    server_name=myapp
+    port=8080
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+type: Opaque
+stringData:
+  db-password: "secret123"
+  api-key: "key456"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: projected-demo
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh", "-c", "ls -la /config && cat /config/* && sleep 3600"]
+    volumeMounts:
+    - name: all-in-one
+      mountPath: /config
+      readOnly: true
+  volumes:
+  - name: all-in-one
+    projected:
+      sources:
+      - configMap:
+          name: app-settings
+      - secret:
+          name: app-secrets
+      - downwardAPI:
+          items:
+          - path: "pod-name"
+            fieldRef:
+              fieldPath: metadata.name
+          - path: "namespace"
+            fieldRef:
+              fieldPath: metadata.namespace

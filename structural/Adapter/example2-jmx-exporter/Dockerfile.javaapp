@@ -1,0 +1,23 @@
+FROM openjdk:11-jre-slim
+
+WORKDIR /app
+
+COPY SimpleJavaApp.java .
+
+RUN apt-get update && apt-get install -y openjdk-11-jdk && \
+    javac SimpleJavaApp.java && \
+    apt-get remove -y openjdk-11-jdk && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# Enable JMX remote access
+ENV JAVA_OPTS="-Dcom.sun.management.jmxremote \
+               -Dcom.sun.management.jmxremote.port=9010 \
+               -Dcom.sun.management.jmxremote.rmi.port=9010 \
+               -Dcom.sun.management.jmxremote.authenticate=false \
+               -Dcom.sun.management.jmxremote.ssl=false \
+               -Djava.rmi.server.hostname=localhost"
+
+EXPOSE 9010
+
+CMD java $JAVA_OPTS SimpleJavaApp

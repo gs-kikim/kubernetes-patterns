@@ -1,0 +1,56 @@
+# Allow Internal Egress Only NetworkPolicy
+# This policy allows egress traffic only to pods within the cluster,
+# blocking all external (internet) communication.
+#
+# Use Case:
+# - Prevent data exfiltration by blocking external connections
+# - Allow internal microservice communication
+# - Reduce attack surface
+#
+# Important: policyTypes must include "Egress" to apply egress rules.
+# If policyTypes is omitted and egress is specified, both Ingress and Egress apply!
+#
+# Usage:
+#   kubectl apply -f 03-allow-internal-egress.yaml
+#
+# Test (internal - should succeed):
+#   kubectl exec -n production <pod> -- curl -s random-generator:8080
+#
+# Test (external - should fail):
+#   kubectl exec -n production <pod> -- curl -s --connect-timeout 3 https://google.com
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal-egress-only
+  namespace: production
+  annotations:
+    description: "Allow egress only to cluster-internal destinations"
+spec:
+  # Apply to all pods in the namespace
+  podSelector: {}
+  # IMPORTANT: Only specify Egress to not affect Ingress rules
+  policyTypes:
+    - Egress
+  egress:
+    # Allow egress to all namespaces within the cluster
+    # namespaceSelector: {} matches all namespaces
+    - to:
+        - namespaceSelector: {}
+
+---
+# Alternative: More restrictive - only same namespace
+# Uncomment to allow egress only within the same namespace
+#
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: allow-same-namespace-egress
+#   namespace: production
+# spec:
+#   podSelector: {}
+#   policyTypes:
+#     - Egress
+#   egress:
+#     - to:
+#         - podSelector: {}  # Only pods in same namespace

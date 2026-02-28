@@ -1,0 +1,49 @@
+# Test 2: localhost 통신 검증
+# Pod 내 컨테이너 간 localhost를 통한 통신 확인
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: localhost-verify
+  labels:
+    test: ambassador-localhost
+spec:
+  containers:
+  # 메인 애플리케이션 - curl을 사용하여 localhost 테스트
+  - name: main
+    image: curlimages/curl:8.5.0
+    command:
+    - "/bin/sh"
+    - "-c"
+    - |
+      echo "Waiting for ambassador to start..."
+      sleep 5
+      echo "Testing localhost communication..."
+      while true; do
+        echo "=== $(date) ==="
+        echo "Testing connection to ambassador at localhost:8888"
+        if curl -s http://localhost:8888/health; then
+          echo " - SUCCESS: Ambassador responded"
+        else
+          echo " - FAILED: Could not reach ambassador"
+        fi
+        echo ""
+        sleep 10
+      done
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+
+  # Ambassador - 간단한 HTTP 서버
+  - name: ambassador
+    image: hashicorp/http-echo:1.0
+    args:
+    - "-listen=:8888"
+    - "-text=Hello from Ambassador! Communication via localhost works."
+    ports:
+    - containerPort: 8888
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"

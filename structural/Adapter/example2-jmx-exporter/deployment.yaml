@@ -1,0 +1,135 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jmx-exporter-config
+  labels:
+    app: java-app-jmx
+data:
+  config.yaml: |
+    hostPort: localhost:9010
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+    - pattern: 'com.example<type=SimpleJavaApp><>(RequestCount|ErrorCount|LastResponseTime|ErrorRate): (\d+)'
+      name: simple_java_app_$1
+      type: GAUGE
+      help: "SimpleJavaApp metric: $1"
+    - pattern: 'java.lang<type=Memory><HeapMemoryUsage>(\w+): (\d+)'
+      name: jvm_memory_heap_$1_bytes
+      type: GAUGE
+    - pattern: 'java.lang<type=Threading><>(ThreadCount): (\d+)'
+      name: jvm_threads_$1
+      type: GAUGE
+    - pattern: ".*"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-app-with-jmx-adapter
+  labels:
+    app: java-app-jmx
+    pattern: adapter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-app-jmx
+  template:
+    metadata:
+      labels:
+        app: java-app-jmx
+        pattern: adapter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5556"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      # Main Application - Legacy Java App with JMX
+      - name: java-app
+        image: k8spatterns/simple-java-app:1.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: JAVA_OPTS
+          value: >-
+            -Dcom.sun.management.jmxremote
+            -Dcom.sun.management.jmxremote.port=9010
+            -Dcom.sun.management.jmxremote.rmi.port=9010
+            -Dcom.sun.management.jmxremote.authenticate=false
+            -Dcom.sun.management.jmxremote.ssl=false
+            -Djava.rmi.server.hostname=localhost
+        ports:
+        - containerPort: 9010
+          name: jmx
+          protocol: TCP
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+      # Adapter Container - JMX Exporter
+      - name: jmx-exporter
+        image: bitnami/jmx-exporter:0.20.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - java
+        - -jar
+        - jmx_prometheus_httpserver.jar
+        args:
+        - "5556"
+        - /etc/jmx-config/config.yaml
+        ports:
+        - containerPort: 5556
+          name: metrics
+          protocol: TCP
+        volumeMounts:
+        - name: jmx-config
+          mountPath: /etc/jmx-config
+          readOnly: true
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 5556
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 5556
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+      volumes:
+      - name: jmx-config
+        configMap:
+          name: jmx-exporter-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-app-jmx
+  labels:
+    app: java-app-jmx
+spec:
+  type: ClusterIP
+  selector:
+    app: java-app-jmx
+  ports:
+  - name: jmx
+    port: 9010
+    targetPort: 9010
+    protocol: TCP
+  - name: metrics
+    port: 5556
+    targetPort: 5556
+    protocol: TCP

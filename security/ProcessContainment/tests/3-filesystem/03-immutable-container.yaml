@@ -1,0 +1,58 @@
+# Test: 완전 불변 컨테이너
+# 목적: 읽기 전용 파일시스템과 최소 권한 조합
+# 예상 결과: 컨테이너 파일시스템 완전 보호, 공격 표면 최소화
+# 사용 사례: 상태 비저장 마이크로서비스, API 게이트웨이 등
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: immutable-container
+  labels:
+    test: filesystem
+    scenario: immutable
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+    fsGroup: 2000
+  containers:
+  - name: app
+    image: busybox:1.36
+    command:
+    - sh
+    - -c
+    - |
+      echo "=== Testing Immutable Container ==="
+      echo "1. Attempting to write to root filesystem (should fail)..."
+      if touch /rootfile.txt 2>/dev/null; then
+        echo "ERROR: Root filesystem is writable!"
+      else
+        echo "SUCCESS: Root filesystem is read-only"
+      fi
+
+      echo ""
+      echo "2. Attempting to write to /tmp (should succeed)..."
+      if touch /tmp/tmpfile.txt 2>/dev/null; then
+        echo "SUCCESS: /tmp is writable (emptyDir volume)"
+      else
+        echo "ERROR: /tmp is not writable!"
+      fi
+
+      echo ""
+      echo "3. Checking capabilities..."
+      cat /proc/1/status | grep Cap
+
+      echo ""
+      echo "Container is running in immutable mode. Sleeping..."
+      sleep 3600
+    securityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ['ALL']
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+  volumes:
+  - name: tmp
+    emptyDir: {}

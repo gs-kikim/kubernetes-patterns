@@ -1,0 +1,114 @@
+# Test 3: HTTP 프록시 Ambassador
+# Nginx를 사용하여 외부 HTTP 서비스를 프록시
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-ambassador-config
+  labels:
+    test: ambassador-http-proxy
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        upstream external_service {
+            server httpbin.org:80;
+        }
+
+        server {
+            listen 8080;
+
+            # Health check endpoint
+            location /health {
+                access_log off;
+                return 200 "Ambassador is healthy\n";
+                add_header Content-Type text/plain;
+            }
+
+            # Proxy to external service
+            location / {
+                proxy_pass http://external_service;
+                proxy_set_header Host httpbin.org;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+                # Timeout settings
+                proxy_connect_timeout 5s;
+                proxy_read_timeout 10s;
+                proxy_send_timeout 10s;
+
+                # Retry logic
+                proxy_next_upstream error timeout http_502 http_503 http_504;
+                proxy_next_upstream_tries 3;
+            }
+        }
+    }
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: http-proxy-ambassador
+  labels:
+    test: ambassador-http-proxy
+spec:
+  containers:
+  # 메인 애플리케이션 - Ambassador를 통해 외부 API 호출
+  - name: main
+    image: curlimages/curl:8.5.0
+    command:
+    - "/bin/sh"
+    - "-c"
+    - |
+      echo "Waiting for ambassador..."
+      sleep 3
+
+      # Ambassador health check
+      until curl -s http://localhost:8080/health > /dev/null; do
+        echo "Waiting for ambassador to be ready..."
+        sleep 2
+      done
+
+      echo "Ambassador is ready!"
+      echo ""
+
+      while true; do
+        echo "=== Request at $(date) ==="
+        echo "Calling external API via Ambassador (localhost:8080)..."
+
+        # Ambassador를 통해 외부 서비스 호출
+        response=$(curl -s -w "\nHTTP Status: %{http_code}\n" http://localhost:8080/get?ambassador=test)
+        echo "$response"
+        echo ""
+
+        sleep 15
+      done
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+
+  # Nginx Ambassador - 외부 HTTP 서비스 프록시
+  - name: ambassador
+    image: nginx:1.25-alpine
+    ports:
+    - containerPort: 8080
+    volumeMounts:
+    - name: nginx-config
+      mountPath: /etc/nginx/nginx.conf
+      subPath: nginx.conf
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+  volumes:
+  - name: nginx-config
+    configMap:
+      name: nginx-ambassador-config

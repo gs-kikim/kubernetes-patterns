@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant K as Kubernetes
+    participant M as Main Container<br/>(Batch Job)
+    participant A as Adapter<br/>(Traditional Sidecar)
+
+    K->>M: Start
+    K->>A: Start (동시)
+
+    Note over M: 데이터 처리 중
+    Note over A: 메트릭 수집 중
+
+    M->>M: 처리 완료
+    M->>K: Exit 0
+
+    Note over A: 계속 실행 중
+
+    Note over K: Job Status: Running (0/1)<br/>Pod 종료되지 않음
+
+    rect rgb(255, 200, 200)
+        Note over K,A: 문제: Adapter가 계속 실행되어<br/>Job이 Complete 상태가 되지 않음
+    end

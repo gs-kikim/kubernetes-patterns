@@ -1,0 +1,182 @@
+# Test 4: 환경별 백엔드 전환 - 프로덕션 환경
+# 프로덕션 환경에서는 HAProxy를 통해 여러 Redis 인스턴스로 로드밸런싱
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cache-config-prod
+  labels:
+    env: production
+    test: ambassador-env-backend
+data:
+  backend: "redis-cluster"
+  description: "Production environment using Redis cluster with load balancing"
+
+---
+# 프로덕션 백엔드 Redis 인스턴스들 (클러스터 시뮬레이션)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis-backend-1
+  labels:
+    app: redis-backend
+    instance: "1"
+spec:
+  containers:
+  - name: redis
+    image: redis:7-alpine
+    ports:
+    - containerPort: 6379
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-backend-1
+spec:
+  selector:
+    app: redis-backend
+    instance: "1"
+  ports:
+  - port: 6379
+    targetPort: 6379
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: redis-backend-2
+  labels:
+    app: redis-backend
+    instance: "2"
+spec:
+  containers:
+  - name: redis
+    image: redis:7-alpine
+    ports:
+    - containerPort: 6379
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-backend-2
+spec:
+  selector:
+    app: redis-backend
+    instance: "2"
+  ports:
+  - port: 6379
+    targetPort: 6379
+
+---
+# HAProxy Ambassador 설정
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: haproxy-ambassador-config
+  labels:
+    env: production
+data:
+  haproxy.cfg: |
+    global
+        daemon
+        maxconn 256
+        log stdout format raw local0 info
+
+    defaults
+        mode tcp
+        timeout connect 5000ms
+        timeout client 50000ms
+        timeout server 50000ms
+        log global
+
+    frontend redis_frontend
+        bind *:6379
+        default_backend redis_backend
+
+    backend redis_backend
+        balance roundrobin
+        option tcp-check
+        tcp-check connect
+
+        # 프로덕션 Redis 클러스터
+        server redis1 redis-backend-1:6379 check inter 3s fall 3 rise 2
+        server redis2 redis-backend-2:6379 check inter 3s fall 3 rise 2
+
+---
+# 메인 애플리케이션 Pod (개발 환경과 동일한 코드)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-prod-env
+  labels:
+    env: production
+    test: ambassador-env-backend
+spec:
+  containers:
+  # 메인 애플리케이션 (개발 환경과 완전히 동일)
+  - name: main
+    image: redis:7-alpine
+    command:
+    - "/bin/sh"
+    - "-c"
+    - |
+      echo "Application starting in PRODUCTION environment..."
+      echo "Cache endpoint: localhost:6379"
+      echo ""
+
+      # Wait for ambassador
+      sleep 5
+
+      echo "Testing cache connection..."
+      while true; do
+        echo "=== $(date) ==="
+
+        # SET command
+        echo "Setting key: test-key-$(date +%s)"
+        redis-cli -h localhost -p 6379 SET "test-key" "value-$(date +%s)" EX 30
+
+        # GET command
+        echo "Getting key: test-key"
+        value=$(redis-cli -h localhost -p 6379 GET "test-key")
+        echo "Value: $value"
+
+        # INFO command to see which backend (via HAProxy stats)
+        echo "Connected to backend via Ambassador/HAProxy"
+        echo ""
+
+        sleep 10
+      done
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+
+  # Ambassador - HAProxy로 여러 Redis 백엔드 로드밸런싱
+  - name: ambassador
+    image: haproxy:2.9-alpine
+    ports:
+    - containerPort: 6379
+    volumeMounts:
+    - name: haproxy-config
+      mountPath: /usr/local/etc/haproxy/haproxy.cfg
+      subPath: haproxy.cfg
+    env:
+    - name: ENVIRONMENT
+      valueFrom:
+        configMapKeyRef:
+          name: cache-config-prod
+          key: backend
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+
+  volumes:
+  - name: haproxy-config
+    configMap:
+      name: haproxy-ambassador-config

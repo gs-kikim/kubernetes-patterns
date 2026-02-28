@@ -1,0 +1,40 @@
+# Test: HostPath 볼륨 사용 Pod
+# 목적: restricted 정책의 볼륨 타입 제한 검증
+# 예상 결과:
+#   - pss-privileged: 생성 성공
+#   - pss-baseline: 생성 성공 (hostPath는 baseline에서 허용)
+#   - pss-restricted: 생성 거부 (hostPath는 restricted에서 차단)
+# 테스트:
+#   kubectl apply -f 04-hostpath-pod.yaml -n pss-baseline   # 성공
+#   kubectl apply -f 04-hostpath-pod.yaml -n pss-restricted # 실패
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostpath-pod
+  labels:
+    test: pss
+    scenario: hostpath
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ['sh', '-c', 'sleep 3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ['ALL']
+    volumeMounts:
+    - name: host-volume
+      mountPath: /host-data
+      readOnly: true
+  volumes:
+  - name: host-volume
+    hostPath:              # restricted에서 차단됨
+      path: /tmp
+      type: Directory

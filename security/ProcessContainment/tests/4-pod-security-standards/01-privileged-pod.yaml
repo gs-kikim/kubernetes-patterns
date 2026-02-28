@@ -1,0 +1,25 @@
+# Test: Privileged Pod
+# 목적: privileged 컨테이너의 PSS 정책 위반 검증
+# 예상 결과:
+#   - pss-privileged 네임스페이스: 생성 성공
+#   - pss-baseline 네임스페이스: 생성 거부
+#   - pss-restricted 네임스페이스: 생성 거부
+# 테스트:
+#   kubectl apply -f 01-privileged-pod.yaml -n pss-privileged  # 성공
+#   kubectl apply -f 01-privileged-pod.yaml -n pss-baseline    # 실패
+#   kubectl apply -f 01-privileged-pod.yaml -n pss-restricted  # 실패
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-pod
+  labels:
+    test: pss
+    scenario: privileged
+spec:
+  containers:
+  - name: privileged
+    image: busybox:1.36
+    command: ['sh', '-c', 'sleep 3600']
+    securityContext:
+      privileged: true  # baseline에서 차단됨

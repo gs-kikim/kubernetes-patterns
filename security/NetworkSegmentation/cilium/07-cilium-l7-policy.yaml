@@ -1,0 +1,103 @@
+# Cilium L7 HTTP Policy
+# This policy demonstrates L7 (application layer) traffic control.
+# Only possible with CiliumNetworkPolicy, not standard NetworkPolicy.
+#
+# Features:
+# - HTTP method filtering (GET, POST, PUT, DELETE)
+# - Path-based routing (/api/*, /health, etc.)
+# - Header inspection
+#
+# Prerequisites:
+# - Cilium CNI installed
+# - kubectl apply -f 05-3tier-app-deployment.yaml
+#
+# Usage:
+#   kubectl apply -f cilium/07-cilium-l7-policy.yaml
+#
+# Test:
+#   # GET request - should work
+#   kubectl exec -n production deploy/curl-client-labeled -- \
+#     curl -s http://random-generator:8080/
+#
+#   # POST request - should be blocked
+#   kubectl exec -n production deploy/curl-client-labeled -- \
+#     curl -s -X POST http://random-generator:8080/
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: random-generator-l7-policy
+  namespace: production
+  annotations:
+    description: "L7 HTTP policy - Allow only GET requests to random-generator"
+spec:
+  # Target pods with app=random-generator
+  endpointSelector:
+    matchLabels:
+      app: random-generator
+  ingress:
+    # Allow from pods with role=random-client label
+    - fromEndpoints:
+        - matchLabels:
+            role: random-client
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+          rules:
+            http:
+              # Allow GET requests to any path
+              - method: GET
+                path: "/.*"
+              # Allow health check endpoint with any method
+              - method: ".*"
+                path: "/health"
+
+---
+# More restrictive example: API endpoint protection
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: api-endpoint-protection
+  namespace: production
+  annotations:
+    description: "Protect specific API endpoints with method restrictions"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: random-generator
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            tier: frontend
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+          rules:
+            http:
+              # Read-only access: GET only
+              - method: GET
+                path: "/api/v1/.*"
+              # Health endpoints
+              - method: GET
+                path: "/health"
+              - method: GET
+                path: "/ready"
+
+    # Admin access from specific pods
+    - fromEndpoints:
+        - matchLabels:
+            role: admin
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+          rules:
+            http:
+              # Full CRUD access for admins
+              - method: ".*"
+                path: "/api/v1/.*"
+              # Admin endpoints
+              - method: ".*"
+                path: "/admin/.*"

@@ -1,0 +1,11 @@
+host: dev-db.local
+port: 5432
+name: myapp_dev
+username: dev_user
+pool:
+  min: 2
+  max: 10
+  timeout: 30
+connections:
+  maxRetries: 3
+  retryDelay: 5

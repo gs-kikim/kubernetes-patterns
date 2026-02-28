@@ -1,0 +1,40 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config-immutable
+data:
+  app.properties: |
+    app.name=MyApp
+    app.environment=development
+    database.host=dev-db.local
+    database.port=5432
+    log.level=DEBUG
+immutable: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-comparison
+  labels:
+    test: configmap
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command:
+    - sh
+    - -c
+    - |
+      echo "=== ConfigMap Configuration ==="
+      cat /config/app.properties
+      echo ""
+      echo "Application running with ConfigMap..."
+      sleep 3600
+    volumeMounts:
+    - name: config
+      mountPath: /config
+  volumes:
+  - name: config
+    configMap:
+      name: app-config-immutable

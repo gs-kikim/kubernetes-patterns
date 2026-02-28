@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: random-generator-mutable
+  labels:
+    app: random-generator-mutable
+    pattern: ConfigurationResource
+spec:
+  containers:
+  - image: busybox:1.36
+    name: monitor
+    command:
+    - sh
+    - -c
+    - |
+      echo "Starting monitoring loop..."
+      while true; do
+        echo "=== $(date) ==="
+        echo "Config file content:"
+        cat /config/app/random-generator.properties
+        echo "VERSION env: $VERSION"
+        echo "---"
+        sleep 10
+      done
+    env:
+    - name: VERSION
+      valueFrom:
+        configMapKeyRef:
+          name: random-generator-config-mutable
+          key: VERSION
+    volumeMounts:
+    - name: config-volume
+      mountPath: /config
+  volumes:
+  - name: config-volume
+    configMap:
+      name: random-generator-config-mutable
+      items:
+      - key: application.properties
+        path: app/random-generator.properties

@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  config.json: |
+    {
+      "version": "1.0",
+      "feature_flags": {
+        "new_ui": true,
+        "beta_features": false
+      }
+    }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: webapp-sidecar
+  labels:
+    app: webapp-sidecar
+    pattern: native-sidecar
+spec:
+  initContainers:
+  # Native sidecar - runs throughout pod lifecycle
+  - name: config-sidecar
+    image: busybox:1.36
+    restartPolicy: Always  # This makes it a sidecar!
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "$(date): Sidecar starting - will refresh config periodically"
+        COUNTER=0
+        while true; do
+          COUNTER=$((COUNTER + 1))
+          echo "$(date): Config refresh cycle #$COUNTER"
+
+          # Simulate config refresh from ConfigMap
+          cp /config-source/config.json /config-dest/config.json
+          echo "$(date): Config updated (version: $(grep version /config-dest/config.json | cut -d'"' -f4))"
+
+          # Write refresh timestamp
+          date > /config-dest/last-refresh.txt
+
+          sleep 10
+        done
+    volumeMounts:
+    - name: config-source
+      mountPath: /config-source
+    - name: config-dest
+      mountPath: /config-dest
+    startupProbe:
+      exec:
+        command: ["test", "-f", "/config-dest/config.json"]
+      initialDelaySeconds: 1
+      periodSeconds: 1
+    livenessProbe:
+      exec:
+        command: ["test", "-f", "/config-dest/config.json"]
+      periodSeconds: 5
+
+  containers:
+  # Main application container
+  - name: webapp
+    image: busybox:1.36
+    command:
+      - /bin/sh
+      - -c
+      - |
+        echo "$(date): Main container starting"
+        echo "Waiting for config from sidecar..."
+
+        while [ ! -f /app-config/config.json ]; do
+          sleep 1
+        done
+
+        echo "$(date): Config received!"
+        cat /app-config/config.json
+
+        # Simulate application running and reading config periodically
+        for i in 1 2 3 4 5; do
+          echo "---"
+          echo "$(date): Application cycle #$i"
+          echo "Config last refreshed: $(cat /app-config/last-refresh.txt 2>/dev/null || echo 'unknown')"
+          sleep 5
+        done
+
+        echo "$(date): Main container exiting"
+    volumeMounts:
+    - name: config-dest
+      mountPath: /app-config
+      readOnly: true
+
+  volumes:
+  - name: config-source
+    configMap:
+      name: app-config
+  - name: config-dest
+    emptyDir: {}

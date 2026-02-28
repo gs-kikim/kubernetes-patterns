@@ -1,0 +1,26 @@
+# Test: Baseline 준수 Pod
+# 목적: baseline 정책을 만족하는 Pod 검증
+# 예상 결과:
+#   - pss-privileged 네임스페이스: 생성 성공
+#   - pss-baseline 네임스페이스: 생성 성공 (경고 표시)
+#   - pss-restricted 네임스페이스: 생성 거부 (seccompProfile 미설정)
+# 테스트:
+#   kubectl apply -f 02-baseline-pod.yaml -n pss-baseline  # 성공, restricted 경고
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: baseline-pod
+  labels:
+    test: pss
+    scenario: baseline
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ['sh', '-c', 'sleep 3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ['ALL']
+# 주의: runAsNonRoot와 seccompProfile이 없어 restricted에서 거부됨

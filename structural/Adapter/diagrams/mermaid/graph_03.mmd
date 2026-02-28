@@ -1,0 +1,19 @@
+graph LR
+    subgraph "Sidecar Pattern"
+        M1[Main] <-->|양방향| S1[Sidecar]
+        S1 -.->|"Git sync<br/>Log rotation<br/>Config reload"| X1[ ]
+    end
+
+    subgraph "Adapter Pattern"
+        M2[Main] -->|커스텀 형식| A[Adapter]
+        A -->|표준 형식| E[External]
+    end
+
+    subgraph "Ambassador Pattern"
+        E2[External] -->|요청| AM[Ambassador]
+        AM -->|추상화| M3[Main]
+    end
+
+    style A fill:#ffd700
+    style AM fill:#ff69b4
+    style S1 fill:#98fb98

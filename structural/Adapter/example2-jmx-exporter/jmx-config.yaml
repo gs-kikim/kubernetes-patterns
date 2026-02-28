@@ -1,0 +1,43 @@
+# JMX Exporter configuration
+# Maps JMX metrics to Prometheus format
+
+# JMX connection settings
+hostPort: localhost:9010
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+# Rules for metric transformation
+rules:
+# SimpleJavaApp metrics
+- pattern: 'com.example<type=SimpleJavaApp><>(RequestCount|ErrorCount|LastResponseTime|ErrorRate): (\d+)'
+  name: simple_java_app_$1
+  type: GAUGE
+  help: "SimpleJavaApp metric: $1"
+
+# JVM Memory metrics
+- pattern: 'java.lang<type=Memory><HeapMemoryUsage>(\w+): (\d+)'
+  name: jvm_memory_heap_$1_bytes
+  type: GAUGE
+  help: "JVM heap memory $1"
+
+- pattern: 'java.lang<type=Memory><NonHeapMemoryUsage>(\w+): (\d+)'
+  name: jvm_memory_nonheap_$1_bytes
+  type: GAUGE
+  help: "JVM non-heap memory $1"
+
+# JVM Threads
+- pattern: 'java.lang<type=Threading><>(ThreadCount|PeakThreadCount|DaemonThreadCount): (\d+)'
+  name: jvm_threads_$1
+  type: GAUGE
+  help: "JVM thread count: $1"
+
+# JVM GC
+- pattern: 'java.lang<type=GarbageCollector, name=([\w\s]+)><>(CollectionCount|CollectionTime): (\d+)'
+  name: jvm_gc_$2
+  labels:
+    gc: "$1"
+  type: COUNTER
+  help: "JVM GC $2"
+
+# Default: collect all other JMX metrics
+- pattern: ".*"

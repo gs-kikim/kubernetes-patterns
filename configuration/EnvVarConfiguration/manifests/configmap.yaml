@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: random-generator-config
+  labels:
+    pattern: EnvVarConfiguration
+data:
+  PATTERN: "EnvVar Configuration"
+  EXTRA_OPTIONS: "high-secure,native"
+  # This key has illegal characters for environment variable names
+  ILLEG.AL: "Invalid Envvar name"

@@ -1,0 +1,9 @@
+graph TD
+    A[메트릭 없음] --> B{볼륨 마운트<br/>경로 일치?}
+    B -->|No| C[deployment.yaml<br/>경로 수정]
+    B -->|Yes| D{로그 파일<br/>존재?}
+    D -->|No| E[앱 로그 출력<br/>확인]
+    D -->|Yes| F{Adapter<br/>권한 문제?}
+    F -->|Yes| G[readOnly: false<br/>또는 권한 조정]
+    F -->|No| H{파싱 오류?}
+    H -->|Yes| I[Adapter 로그<br/>확인 및 수정]

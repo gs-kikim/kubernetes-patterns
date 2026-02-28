@@ -1,0 +1,26 @@
+sequenceDiagram
+    participant K as Kubernetes
+    participant A as Adapter<br/>(Native Sidecar)
+    participant M as Main Container<br/>(Batch Job)
+
+    K->>A: Start (initContainer)
+    Note over A: 시작 중
+    A->>A: startupProbe 확인
+    A-->>K: Probe Success
+
+    Note over K: Sidecar 준비 완료
+
+    K->>M: Start
+
+    Note over M: 데이터 처리 중
+    Note over A: 메트릭 수집 중
+
+    M->>M: 처리 완료
+    M->>K: Exit 0
+
+    K->>A: Terminate (자동)
+    A->>K: Graceful Shutdown
+
+    rect rgb(200, 255, 200)
+        Note over K,A: 해결: Job Complete (1/1)<br/>Pod Completed
+    end

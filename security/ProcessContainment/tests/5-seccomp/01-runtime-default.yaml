@@ -1,0 +1,47 @@
+# Test: RuntimeDefault Seccomp 프로파일
+# 목적: 기본 seccomp 프로파일의 시스템 콜 제한 검증
+# 예상 결과: 일반 시스템 콜은 허용, 위험한 시스템 콜은 차단
+# 검증: unshare 명령은 차단되어야 함
+# 테스트:
+#   kubectl exec seccomp-runtime-default -- unshare --user true  # 실패 (차단됨)
+#   kubectl exec seccomp-runtime-default -- ls /  # 성공 (허용됨)
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: seccomp-runtime-default
+  labels:
+    test: seccomp
+    scenario: runtime-default
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault  # 컨테이너 런타임의 기본 seccomp 프로파일
+  containers:
+  - name: app
+    image: alpine:3.19
+    command:
+    - sh
+    - -c
+    - |
+      echo "=== Testing RuntimeDefault Seccomp Profile ==="
+      echo "1. Normal syscalls should work..."
+      ls / > /dev/null && echo "SUCCESS: ls command works"
+
+      echo ""
+      echo "2. Dangerous syscalls should be blocked..."
+      if unshare --user true 2>/dev/null; then
+        echo "ERROR: unshare syscall is allowed (should be blocked)"
+      else
+        echo "SUCCESS: unshare syscall is blocked"
+      fi
+
+      echo ""
+      echo "Sleeping for manual testing..."
+      sleep 3600
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ['ALL']

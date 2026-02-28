@@ -1,0 +1,22 @@
+# Vertical Pod Autoscaler (VPA) - Off 모드 (추천만 제공)
+# 프로덕션 초기 도입 시 Off 모드로 추천값을 먼저 관찰하는 것이 권장됨
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: random-generator
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: random-generator
+  updatePolicy:
+    updateMode: "Off"        # 추천만 제공, 자동 적용하지 않음
+  resourcePolicy:
+    containerPolicies:
+    - containerName: random-generator
+      minAllowed:
+        cpu: "100m"
+        memory: "128Mi"
+      maxAllowed:
+        cpu: "2"
+        memory: "4Gi"

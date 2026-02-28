@@ -1,0 +1,62 @@
+# Allow DNS NetworkPolicy
+# This policy allows pods to perform DNS queries to kube-dns.
+# Essential when applying deny-all egress rules.
+#
+# Without DNS access:
+# - Service discovery fails
+# - Pods cannot resolve service names to IP addresses
+# - curl http://random-generator:8080 would fail with DNS error
+#
+# Usage:
+#   kubectl apply -f 04-allow-dns.yaml
+#
+# Test:
+#   kubectl exec -n production <pod> -- nslookup kubernetes.default
+#   Expected: Server and Address lines with resolved IP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: production
+  annotations:
+    description: "Allow DNS queries to kube-dns in kube-system namespace"
+spec:
+  # Apply to all pods
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # Allow DNS queries to kube-dns
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Alternative: Allow DNS to any DNS server (less restrictive)
+# Use this if you have custom DNS servers
+#
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: allow-dns-any
+#   namespace: production
+# spec:
+#   podSelector: {}
+#   policyTypes:
+#     - Egress
+#   egress:
+#     - ports:
+#         - protocol: UDP
+#           port: 53
+#         - protocol: TCP
+#           port: 53

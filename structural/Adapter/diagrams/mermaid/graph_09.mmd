@@ -1,0 +1,23 @@
+graph TB
+    subgraph "Service Mesh"
+        S1[Java Service<br/>JMX]
+        S2[Python Service<br/>Custom]
+        S3[Go Service<br/>StatsD]
+        S4[Node.js Service<br/>prom-client]
+    end
+
+    S1 --> A1[JMX Exporter<br/>Adapter]
+    S2 --> A2[Custom Exporter<br/>Adapter]
+    S3 --> A3[StatsD Exporter<br/>Adapter]
+    S4 --> Direct[Direct Export]
+
+    A1 --> P[Prometheus]
+    A2 --> P
+    A3 --> P
+    Direct --> P
+
+    P --> G[Grafana Dashboard]
+
+    style A1 fill:#ffd700
+    style A2 fill:#ffd700
+    style A3 fill:#ffd700

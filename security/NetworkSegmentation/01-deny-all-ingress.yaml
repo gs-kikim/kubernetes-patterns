@@ -1,0 +1,41 @@
+# Deny All Ingress NetworkPolicy
+# This policy blocks all incoming traffic to pods in the production namespace.
+# Apply this first to establish a "deny by default" posture (Zero Trust).
+#
+# Usage:
+#   kubectl apply -f 01-deny-all-ingress.yaml
+#
+# Test:
+#   kubectl exec -n production <client-pod> -- curl -s --connect-timeout 3 <target-ip>:8080
+#   Expected: Connection timed out
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-ingress
+  namespace: production
+  annotations:
+    description: "Block all incoming traffic to pods in production namespace"
+spec:
+  # Empty podSelector means this policy applies to ALL pods in the namespace
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  # Empty ingress array means NO ingress traffic is allowed
+  ingress: []
+
+---
+# Optional: Deny All Egress as well for complete isolation
+# Uncomment if you want to block outgoing traffic too
+# Note: This will break DNS resolution unless you add DNS allow rule first
+#
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: deny-all-egress
+#   namespace: production
+# spec:
+#   podSelector: {}
+#   policyTypes:
+#     - Egress
+#   egress: []

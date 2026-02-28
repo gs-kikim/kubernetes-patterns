@@ -1,0 +1,55 @@
+# NOTE: Custom Seccomp 프로파일 사용
+#
+# 커스텀 seccomp 프로파일을 사용하려면 다음 단계가 필요합니다:
+#
+# 1. 프로파일을 모든 노드에 배치
+#    프로파일 파일을 모든 워커 노드의 /var/lib/kubelet/seccomp/ 디렉토리에 복사
+#
+#    예: /var/lib/kubelet/seccomp/deny-chmod.json
+#
+# 2. Pod 스펙에서 Localhost 타입으로 참조
+#
+# 예제:
+# apiVersion: v1
+# kind: Pod
+# metadata:
+#   name: custom-seccomp-test
+# spec:
+#   securityContext:
+#     seccompProfile:
+#       type: Localhost
+#       localhostProfile: deny-chmod.json  # /var/lib/kubelet/seccomp/ 기준 상대 경로
+#   containers:
+#   - name: app
+#     image: busybox:1.36
+#     command: ['sh', '-c', 'chmod 777 /tmp && sleep 3600']
+#
+# 3. 테스트
+#    kubectl exec custom-seccomp-test -- chmod 777 /tmp  # 실패 (차단됨)
+#
+# 주의사항:
+# - Security Profiles Operator를 사용하면 노드 배포를 자동화할 수 있습니다
+# - Minikube/Kind 등 로컬 클러스터에서는 ssh로 노드 접근 후 직접 복사 필요
+# - 클라우드 환경에서는 DaemonSet을 통해 프로파일 배포 권장
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: seccomp-custom-note
+  labels:
+    test: seccomp
+    scenario: custom-profile-note
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault  # 커스텀 프로파일 대신 기본 프로파일 사용
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ['sh', '-c', 'echo "See comments for custom seccomp profile usage" && sleep 3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ['ALL']

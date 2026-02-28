@@ -1,0 +1,140 @@
+# Cilium DNS-based Egress Policy
+# This policy demonstrates FQDN (Fully Qualified Domain Name) based egress control.
+# Allows specifying external destinations by domain name instead of IP.
+#
+# Features:
+# - Domain name matching (exact and wildcard)
+# - DNS-aware egress filtering
+# - No need to know IP addresses in advance
+#
+# Prerequisites:
+# - Cilium CNI installed with DNS proxy enabled
+#
+# Usage:
+#   kubectl apply -f cilium/08-cilium-dns-egress.yaml
+#
+# Test:
+#   # Allowed domain - should work
+#   kubectl exec -n production deploy/curl-client-labeled -- \
+#     curl -s https://api.github.com
+#
+#   # Blocked domain - should fail
+#   kubectl exec -n production deploy/curl-client-labeled -- \
+#     curl -s --connect-timeout 3 https://example.com
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: dns-based-egress
+  namespace: production
+  annotations:
+    description: "Allow egress to specific external domains only"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: random-generator
+  egress:
+    # 1. Always allow DNS queries first (required for FQDN resolution)
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+
+    # 2. Allow specific external domains
+    - toFQDNs:
+        # Exact domain match
+        - matchName: "api.github.com"
+        # Wildcard match for Google APIs
+        - matchPattern: "*.googleapis.com"
+        # Allow any AWS S3 endpoints
+        - matchPattern: "*.s3.amazonaws.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+
+---
+# Example: Application-specific external access
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: backend-external-access
+  namespace: production
+  annotations:
+    description: "Backend specific external API access"
+spec:
+  endpointSelector:
+    matchLabels:
+      tier: backend
+  egress:
+    # DNS resolution
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+          rules:
+            dns:
+              - matchPattern: "*"
+
+    # Internal database access
+    - toEndpoints:
+        - matchLabels:
+            tier: database
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+
+    # External payment API
+    - toFQDNs:
+        - matchName: "api.stripe.com"
+        - matchName: "api.paypal.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+
+    # External logging/monitoring
+    - toFQDNs:
+        - matchPattern: "*.datadoghq.com"
+        - matchPattern: "*.newrelic.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+
+---
+# Deny external access by default, allow only approved domains
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: default-deny-external
+  namespace: production
+  annotations:
+    description: "Deny all external egress by default"
+spec:
+  endpointSelector: {}
+  egress:
+    # Only allow internal cluster communication
+    - toEndpoints:
+        - {}  # All cluster endpoints
+    # Allow DNS
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP

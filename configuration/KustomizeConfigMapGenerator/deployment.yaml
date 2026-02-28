@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kustomize-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kustomize-app
+  template:
+    metadata:
+      labels:
+        app: kustomize-app
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.36
+        command: ["sh", "-c", "cat /config/app.properties && sleep 3600"]
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: app-config

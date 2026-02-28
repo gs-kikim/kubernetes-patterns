@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  labels:
+    app: webapp
+    pattern: configuration-template
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+        pattern: configuration-template
+    spec:
+      initContainers:
+      # Init container that processes templates using gomplate
+      - name: template-processor
+        image: hairyhenderson/gomplate:v4.3.0-alpine
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Starting template processing..."
+
+            # Create config datasource file from ConfigMap data (using JSON to avoid YAML # comment issues)
+            cat > /tmp/config.json <<EOF
+{
+  "environment": "$ENVIRONMENT",
+  "logLevel": "$LOG_LEVEL",
+  "appColor": "$APP_COLOR",
+  "replicas": "$REPLICAS",
+  "cacheEnabled": "$CACHE_ENABLED"
+}
+EOF
+
+            echo "Config datasource created:"
+            cat /tmp/config.json
+
+            # Process HTML template
+            echo "Processing index.html template..."
+            gomplate \
+              -d config=/tmp/config.json \
+              -f /templates/index.html.tmpl \
+              -o /config/index.html
+
+            # Process nginx.conf template
+            echo "Processing nginx.conf template..."
+            gomplate \
+              -d config=/tmp/config.json \
+              -f /templates/nginx.conf.tmpl \
+              -o /config/nginx.conf
+
+            echo "Template processing completed!"
+            echo "Generated files:"
+            ls -la /config/
+
+            echo "=== index.html preview ==="
+            head -20 /config/index.html
+
+            echo "=== nginx.conf preview ==="
+            head -20 /config/nginx.conf
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: webapp-config
+              key: environment
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: webapp-config
+              key: logLevel
+        - name: APP_COLOR
+          valueFrom:
+            configMapKeyRef:
+              name: webapp-config
+              key: appColor
+        - name: REPLICAS
+          valueFrom:
+            configMapKeyRef:
+              name: webapp-config
+              key: replicas
+        - name: CACHE_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: webapp-config
+              key: cacheEnabled
+        volumeMounts:
+        - name: templates
+          mountPath: /templates
+        - name: config
+          mountPath: /config
+
+      containers:
+      # Main application container (nginx)
+      - name: webapp
+        image: nginx:1.27-alpine
+        ports:
+        - containerPort: 8080
+          name: http
+        volumeMounts:
+        - name: config
+          mountPath: /usr/share/nginx/html/index.html
+          subPath: index.html
+          readOnly: true
+        - name: config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+
+      volumes:
+      # ConfigMap containing templates
+      - name: templates
+        configMap:
+          name: webapp-config
+          items:
+          - key: index.html.tmpl
+            path: index.html.tmpl
+          - key: nginx.conf.tmpl
+            path: nginx.conf.tmpl
+      # Shared volume for processed configuration
+      - name: config
+        emptyDir: {}

@@ -1,0 +1,10 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY batch-job.py .
+
+RUN chmod +x batch-job.py && \
+    mkdir -p /data
+
+CMD ["python", "batch-job.py"]

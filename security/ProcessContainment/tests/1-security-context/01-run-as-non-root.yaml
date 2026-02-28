@@ -1,0 +1,19 @@
+# Test: runAsNonRoot 설정
+# 목적: root 사용자로 실행되는 컨테이너 차단 검증
+# 예상 결과: nginx 이미지는 기본적으로 root로 실행되므로 Pod 생성 실패
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: non-root-test
+  labels:
+    test: security-context
+    scenario: run-as-non-root
+spec:
+  securityContext:
+    runAsNonRoot: true  # root 사용자 실행 차단
+  containers:
+  - name: nginx
+    image: nginx:1.25
+    ports:
+    - containerPort: 80

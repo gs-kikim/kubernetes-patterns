@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-config
+  labels:
+    environment: production
+data:
+  # Environment-specific values
+  environment: "PRODUCTION"
+  logLevel: "ERROR"
+  appColor: "#FF0000"
+  replicas: "3"
+  cacheEnabled: "true"
+
+  # HTML template for nginx (same template, different values)
+  index.html.tmpl: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Configuration Template Demo</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 50px auto;
+                padding: 20px;
+                background-color: {{ (datasource "config").appColor }};
+            }
+            .info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin: 10px 0; }
+            .label { font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <h1>Configuration Template Pattern</h1>
+        <h2>Environment: {{ (datasource "config").environment }}</h2>
+
+        <div class="info">
+            <div><span class="label">Log Level:</span> {{ (datasource "config").logLevel }}</div>
+            <div><span class="label">Replicas:</span> {{ (datasource "config").replicas }}</div>
+            <div><span class="label">Cache Enabled:</span> {{ (datasource "config").cacheEnabled }}</div>
+            <div><span class="label">Pod Started:</span> {{ getenv "HOSTNAME" | default "unknown" }}</div>
+            <div><span class="label">Hostname:</span> {{ getenv "HOSTNAME" }}</div>
+        </div>
+
+        <h3>About This Demo</h3>
+        <p>This page was generated using <strong>gomplate</strong> template engine in an init container.</p>
+        <p>The configuration values come from a Kubernetes ConfigMap named <code>webapp-config</code>.</p>
+        <p>Try switching to production configuration to see different values!</p>
+    </body>
+    </html>
+
+  # Nginx configuration template
+  nginx.conf.tmpl: |
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        log_format main '{{ (datasource "config").environment }} - $remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for"';
+
+        access_log /var/log/nginx/access.log main;
+        error_log /var/log/nginx/error.log {{ (datasource "config").logLevel | strings.ToLower }};
+
+        server {
+            listen 8080;
+            server_name localhost;
+
+            location / {
+                root /usr/share/nginx/html;
+                index index.html;
+            }
+
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+        }
+    }

@@ -1,0 +1,26 @@
+# Test: readOnlyRootFilesystem (실패 케이스)
+# 목적: 쓰기가 필요한 애플리케이션에서 읽기 전용 FS의 문제 이해
+# 예상 결과: nginx가 /var/run, /var/cache에 쓰기 실패로 CrashLoopBackOff
+# 교훈: readOnlyRootFilesystem 사용 시 필요한 경로에 emptyDir 마운트 필요
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: readonly-fail
+  labels:
+    test: filesystem
+    scenario: readonly-failure
+spec:
+  securityContext:
+    runAsUser: 101  # nginx 사용자
+    runAsNonRoot: true
+  containers:
+  - name: nginx
+    image: nginx:1.25
+    securityContext:
+      readOnlyRootFilesystem: true  # 루트 FS 읽기 전용
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ['ALL']
+        add: ['NET_BIND_SERVICE']
+    # 주의: 볼륨 마운트 없이 nginx 실행 시 실패함

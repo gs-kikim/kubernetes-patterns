@@ -1,0 +1,13 @@
+graph LR
+    subgraph "GoF Adapter Pattern (OOP)"
+        Client[Client Code] --> Adapter[Adapter Class]
+        Adapter --> Service[3rd Party Library]
+    end
+
+    subgraph "Kubernetes Adapter Pattern (Container)"
+        External[External System<br/>Prometheus] --> AdapterContainer[Adapter Container<br/>Exporter]
+        AdapterContainer --> MainApp[Main Container<br/>Application]
+    end
+
+    style Adapter fill:#ffd700
+    style AdapterContainer fill:#ffd700

@@ -1,0 +1,228 @@
+# 3-Tier Application Deployment
+# This deploys a simple 3-tier architecture for NetworkPolicy testing:
+# - Frontend: Receives external traffic
+# - Backend: Processes business logic
+# - Database: Stores data
+#
+# Architecture:
+#   Internet -> Frontend -> Backend -> Database
+#
+# Usage:
+#   kubectl apply -f 05-3tier-app-deployment.yaml
+---
+# Random Generator (simulates Backend API)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: random-generator
+  namespace: production
+  labels:
+    app: random-generator
+    tier: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: random-generator
+  template:
+    metadata:
+      labels:
+        app: random-generator
+        tier: backend
+        has-metrics: "true"
+    spec:
+      containers:
+        - name: random-generator
+          image: k8spatterns/random-generator:1.0
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: random-generator
+  namespace: production
+spec:
+  selector:
+    app: random-generator
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+
+---
+# Frontend (nginx - simulates web frontend)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: production
+  labels:
+    app: frontend
+    tier: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        tier: frontend
+        # This label allows frontend to access backend
+        role: random-client
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "50m"
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: production
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+
+---
+# Database (PostgreSQL simulation using busybox)
+# In real scenarios, use actual database image
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: database
+  namespace: production
+  labels:
+    app: database
+    tier: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: database
+  template:
+    metadata:
+      labels:
+        app: database
+        tier: database
+    spec:
+      containers:
+        - name: database
+          # Using a simple TCP echo server to simulate database
+          image: busybox:1.36
+          command: ["nc", "-lk", "-p", "5432", "-e", "cat"]
+          ports:
+            - containerPort: 5432
+              name: postgres
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: database
+  namespace: production
+spec:
+  selector:
+    app: database
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+
+---
+# Curl client for testing (no labels - should be blocked by default)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: curl-client
+  namespace: production
+  labels:
+    app: curl-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: curl-client
+  template:
+    metadata:
+      labels:
+        app: curl-client
+        # Note: No "role: random-client" label - will be blocked by NetworkPolicy
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:latest
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"
+
+---
+# Curl client WITH label (should be allowed)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: curl-client-labeled
+  namespace: production
+  labels:
+    app: curl-client-labeled
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: curl-client-labeled
+  template:
+    metadata:
+      labels:
+        app: curl-client-labeled
+        # Has the label - will be allowed by NetworkPolicy
+        role: random-client
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:latest
+          command: ["sleep", "infinity"]
+          resources:
+            requests:
+              memory: "16Mi"
+              cpu: "25m"
+            limits:
+              memory: "32Mi"
+              cpu: "50m"

@@ -1,0 +1,25 @@
+# Test: 모든 Capabilities 제거
+# 목적: 기본 capabilities 완전 제거 검증
+# 예상 결과: Pod 생성 성공, 모든 capabilities가 0
+# 검증: kubectl exec drop-all-caps -- cat /proc/1/status | grep Cap
+#       CapPrm, CapEff 등이 모두 0000000000000000 이어야 함
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: drop-all-caps
+  labels:
+    test: capabilities
+    scenario: drop-all
+spec:
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+  containers:
+  - name: busybox
+    image: busybox:1.36
+    command: ['sh', '-c', 'sleep 3600']
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ['ALL']  # 모든 capabilities 제거

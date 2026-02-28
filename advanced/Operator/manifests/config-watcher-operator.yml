@@ -1,0 +1,137 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: config-watcher-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: config-watcher-operator
+subjects:
+- kind: ServiceAccount
+  name: config-watcher-operator
+roleRef:
+  name: edit
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: config-watcher-crd
+rules:
+- apiGroups: ["k8spatterns.com"]
+  resources: ["configwatchers"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: config-watcher-crd
+subjects:
+- kind: ServiceAccount
+  name: config-watcher-operator
+roleRef:
+  name: config-watcher-crd
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-watcher-operator
+data:
+  config-watcher-operator.sh: |
+    #!/bin/bash
+    namespace=${WATCH_NAMESPACE:-default}
+    base=http://localhost:8001
+    ns=namespaces/$namespace
+
+    start_event_loop() {
+      echo "::: Starting to watch ConfigMaps in namespace $namespace"
+
+      curl -N -s $base/api/v1/${ns}/configmaps?watch=true | while read -r event
+      do
+        event=$(echo "$event" | tr '\r\n' ' ')
+        local type=$(echo "$event" | jq -r .type)
+        local config_map=$(echo "$event" | jq -r .object.metadata.name)
+
+        echo "::: Event: $type on ConfigMap $config_map"
+
+        if [ "$type" = "MODIFIED" ]; then
+          echo "::: ConfigMap $config_map modified, checking ConfigWatcher CRDs..."
+
+          # Query ConfigWatcher CRDs to find watchers for this ConfigMap
+          local watchers=$(curl -s $base/apis/k8spatterns.com/v1/${ns}/configwatchers | \
+            jq -r ".items[] | select(.spec.configMap == \"$config_map\")")
+
+          if [ -n "$watchers" ]; then
+            echo "$watchers" | jq -r '.spec.podSelector.matchLabels | to_entries | map(.key + "=" + .value) | join(",") | @uri' | \
+            while read -r selector; do
+              if [ -n "$selector" ]; then
+                delete_pods_with_selector "$selector"
+              fi
+            done
+          fi
+        fi
+      done
+    }
+
+    delete_pods_with_selector() {
+      local selector=${1}
+      echo "::::: Deleting pods with selector: $selector"
+      local pods=$(curl -s $base/api/v1/${ns}/pods?labelSelector=$selector | jq -r .items[].metadata.name)
+      for pod in $pods; do
+        exit_code=$(curl -s -X DELETE -o /dev/null -w "%{http_code}" $base/api/v1/${ns}/pods/$pod)
+        if [ $exit_code -eq 200 ]; then
+          echo "::::: Deleted pod $pod"
+        else
+          echo "::::: Error deleting pod $pod: $exit_code"
+        fi
+      done
+    }
+
+    start_event_loop
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    project: k8spatterns
+    pattern: Operator
+    role: operator
+  name: config-watcher-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: config-watcher-operator
+  template:
+    metadata:
+      labels:
+        project: k8spatterns
+        pattern: Operator
+        app: config-watcher-operator
+        role: operator
+    spec:
+      serviceAccountName: config-watcher-operator
+      containers:
+      - name: kubeapi-proxy
+        image: k8spatterns/kubeapi-proxy
+      - name: config-watcher
+        image: k8spatterns/curl-jq
+        env:
+         - name: WATCH_NAMESPACE
+           valueFrom:
+             fieldRef:
+               fieldPath: metadata.namespace
+        command:
+        - "sh"
+        - "/watcher/config-watcher-operator.sh"
+        volumeMounts:
+        - mountPath: "/watcher"
+          name: config-watcher-operator
+      volumes:
+      - name: config-watcher-operator
+        configMap:
+          name: config-watcher-operator

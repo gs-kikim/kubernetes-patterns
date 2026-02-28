@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: random-generator
+  labels:
+    app: random-generator
+    pattern: adapter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: random-generator
+  template:
+    metadata:
+      labels:
+        app: random-generator
+        pattern: adapter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9889"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      # Main Application Container
+      - name: random-generator
+        image: k8spatterns/random-generator:1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        env:
+        - name: LOG_FILE
+          value: /var/log/random.log
+        - name: PORT
+          value: "8080"
+        volumeMounts:
+        - name: log-volume
+          mountPath: /var/log
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+      # Adapter Container - Prometheus Exporter
+      - name: prometheus-adapter
+        image: k8spatterns/prometheus-adapter:1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9889
+          name: metrics
+          protocol: TCP
+        env:
+        - name: LOG_FILE
+          value: /var/log/random.log
+        - name: METRICS_PORT
+          value: "9889"
+        volumeMounts:
+        - name: log-volume
+          mountPath: /var/log
+          readOnly: true  # Adapter only reads, doesn't write
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "50m"
+          limits:
+            memory: "64Mi"
+            cpu: "100m"
+
+      volumes:
+      - name: log-volume
+        emptyDir:
+          sizeLimit: 100Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: random-generator
+  labels:
+    app: random-generator
+spec:
+  type: ClusterIP
+  selector:
+    app: random-generator
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  - name: metrics
+    port: 9889
+    targetPort: 9889
+    protocol: TCP

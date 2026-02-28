@@ -1,0 +1,36 @@
+# External Secret을 사용하는 테스트 Pod
+apiVersion: v1
+kind: Pod
+metadata:
+  name: eso-test-pod
+  namespace: eso-test
+spec:
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: busybox:1.36
+      command: ["sh", "-c"]
+      args:
+        - |
+          echo "=== External Secrets 값 확인 ==="
+          echo "DB Username: $DB_USERNAME"
+          echo "DB Password length: ${#DB_PASSWORD}"
+          echo "API Key 앞 10자리: ${API_KEY:0:10}..."
+          echo "=== 테스트 완료 ==="
+          sleep 10
+      env:
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials-secret
+              key: username
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials-secret
+              key: password
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-credentials-secret
+              key: api-key

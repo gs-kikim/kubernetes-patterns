@@ -1,0 +1,64 @@
+# Test 5: Ambassador 장애 복구 테스트
+# Ambassador 프로세스 종료 시 자동 재시작 및 복구 검증
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: failure-recovery-test
+  labels:
+    test: ambassador-failure-recovery
+spec:
+  containers:
+  # 메인 애플리케이션 - Ambassador 상태 모니터링
+  - name: main
+    image: curlimages/curl:8.5.0
+    command:
+    - "/bin/sh"
+    - "-c"
+    - |
+      echo "Application monitoring Ambassador health..."
+      sleep 3
+
+      success_count=0
+      failure_count=0
+
+      while true; do
+        echo "=== $(date) ==="
+
+        if curl -s --max-time 2 http://localhost:9000/health > /dev/null 2>&1; then
+          success_count=$((success_count + 1))
+          echo "✓ Ambassador is healthy (success: $success_count, failures: $failure_count)"
+        else
+          failure_count=$((failure_count + 1))
+          echo "✗ Ambassador is DOWN! (success: $success_count, failures: $failure_count)"
+          echo "  Waiting for automatic recovery..."
+        fi
+
+        echo ""
+        sleep 5
+      done
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+
+  # Ambassador - 재시작 정책이 Always인 컨테이너
+  - name: ambassador
+    image: hashicorp/http-echo:1.0
+    args:
+    - "-listen=:9000"
+    - "-text=Ambassador is alive"
+    ports:
+    - containerPort: 9000
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 9000
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
+    resources:
+      requests:
+        memory: "32Mi"
+        cpu: "50m"
+    # 참고: Pod 레벨의 restartPolicy는 기본적으로 Always

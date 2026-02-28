@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant J as Java App<br/>(JMX:9010)
+    participant A as JMX Exporter<br/>(Adapter)
+    participant P as Prometheus
+
+    Note over J: JMX MBeans 노출<br/>java.lang:type=Memory
+
+    P->>A: GET /metrics (HTTP)
+    A->>J: JMX Query (RMI)
+    J-->>A: JMX MBean Data
+    Note over A: 형식 변환<br/>JMX to Prometheus
+    A-->>P: jvm_memory_heap_used_bytes 4567891
+
+    Note over P: 메트릭 수집 완료

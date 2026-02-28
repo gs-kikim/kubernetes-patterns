@@ -1,0 +1,11 @@
+host: prod-db.cluster.local
+port: 5432
+name: myapp_prod
+username: prod_user
+pool:
+  min: 10
+  max: 50
+  timeout: 60
+connections:
+  maxRetries: 5
+  retryDelay: 10

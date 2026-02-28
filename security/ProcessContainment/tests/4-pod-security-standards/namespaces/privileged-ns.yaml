@@ -1,0 +1,13 @@
+# Pod Security Standards - Privileged Namespace
+# 목적: 제한 없는 네임스페이스 (관리/인프라 워크로드용)
+# 정책: 제한 없음, 모든 보안 설정 허용
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pss-privileged
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+    test: pod-security-standards

@@ -1,0 +1,23 @@
+# Pod Security Standards - Baseline Namespace
+# 목적: 일반 워크로드용 기본 보안 정책
+# 정책: 알려진 권한 상승 방지, privileged 컨테이너 차단
+# 추가 경고: restricted 수준 위반 시 경고 표시
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pss-baseline
+  labels:
+    # baseline 정책 위반 시 Pod 생성 거부
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+
+    # restricted 정책 위반 시 경고만 표시
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+
+    # restricted 정책 위반을 감사 로그에 기록
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+
+    test: pod-security-standards

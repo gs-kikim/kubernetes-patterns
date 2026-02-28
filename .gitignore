@@ -4,3 +4,5 @@
 
 .trunk/*
 **/.trunk/*
+**/*.md
+!README.md

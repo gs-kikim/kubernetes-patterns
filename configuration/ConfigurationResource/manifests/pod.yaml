@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: random-generator
+  labels:
+    app: random-generator
+    pattern: ConfigurationResource
+spec:
+  containers:
+  - image: k8spatterns/random-generator:1.0
+    name: random-generator
+    # Individual environment variable from ConfigMap
+    env:
+    - name: SPRING_CONFIG_LOCATION
+      value: /config/app/random-generator.properties
+    - name: PATTERN
+      valueFrom:
+        configMapKeyRef:
+          name: random-generator-config
+          key: PATTERN
+    # Import all ConfigMap entries as environment variables with prefix
+    envFrom:
+    - configMapRef:
+        name: random-generator-config
+        optional: false
+      prefix: CONFIG_
+    # Mount ConfigMap as volume
+    volumeMounts:
+    - name: config-volume
+      mountPath: /config
+    ports:
+    - containerPort: 8080
+      name: http
+  volumes:
+  - name: config-volume
+    configMap:
+      name: random-generator-config
+      items:
+      - key: application.properties
+        path: app/random-generator.properties
+        mode: 0400

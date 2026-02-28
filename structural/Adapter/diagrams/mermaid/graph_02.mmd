@@ -1,0 +1,21 @@
+graph TB
+    subgraph "Kubernetes Pod"
+        subgraph "Main Container"
+            App[Application<br/>커스텀 형식 출력]
+        end
+
+        subgraph "Adapter Container"
+            Adapter[Format Transformer<br/>표준 형식 변환]
+        end
+
+        Volume[Shared Volume<br/>emptyDir]
+
+        App -->|write| Volume
+        Volume -->|read| Adapter
+    end
+
+    External[External System<br/>Prometheus/ELK] -->|HTTP GET /metrics| Adapter
+
+    style App fill:#87ceeb
+    style Adapter fill:#ffd700
+    style Volume fill:#90ee90

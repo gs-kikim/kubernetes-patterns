@@ -1,0 +1,43 @@
+# Test Pod with ServiceAccount for API access testing
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: api-test
+  namespace: rbac-test
+  labels:
+    app: api-test
+spec:
+  serviceAccountName: app-sa
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command: ["sleep", "3600"]
+---
+# Test Pod without token mount (security best practice test)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-token-test
+  namespace: rbac-test
+  labels:
+    app: no-token-test
+spec:
+  serviceAccountName: no-token-sa
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command: ["sleep", "3600"]
+---
+# Sample Pod in rbac-test-2 namespace for cross-namespace testing
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sample-pod
+  namespace: rbac-test-2
+  labels:
+    app: sample
+spec:
+  containers:
+  - name: nginx
+    image: nginx:alpine

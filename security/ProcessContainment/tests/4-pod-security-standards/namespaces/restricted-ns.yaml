@@ -1,0 +1,20 @@
+# Pod Security Standards - Restricted Namespace
+# 목적: 보안 중요 워크로드용 최대 보안 정책
+# 정책: 모든 보안 모범 사례 강제 적용
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pss-restricted
+  labels:
+    # restricted 정책 위반 시 Pod 생성 거부
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+
+    # 동일 수준으로 경고 및 감사
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+
+    test: pod-security-standards

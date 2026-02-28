@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: random-generator
+  labels:
+    app: random-generator
+    pattern: EnvVarConfiguration
+spec:
+  containers:
+  - image: k8spatterns/random-generator:1.0
+    name: random-generator
+    # Direct literal environment variables
+    env:
+    - name: LOG_FILE
+      value: /tmp/random.log
+    # Secret reference
+    - name: SEED
+      valueFrom:
+        secretKeyRef:
+          name: random-generator-secret
+          key: seed
+    # Literal port value
+    - name: PORT
+      value: "8181"
+    # Downward API - Pod IP
+    - name: IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    # Dependent variables - using previously defined env vars
+    - name: MY_URL
+      value: "https://$(IP):$(PORT)/$(CONTEXT)"
+    - name: DESCRIPTION
+      value: "Welcome to $(RANDOM_PATTERN) !"
+    - name: CONTEXT
+      value: "login/"
+    # Import all ConfigMap entries as environment variables with prefix
+    envFrom:
+    - configMapRef:
+        name: random-generator-config
+      prefix: RANDOM_
+    ports:
+    - containerPort: 8080
+      name: http

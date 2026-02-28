@@ -1,0 +1,26 @@
+stateDiagram-v2
+    [*] --> InitContainers: Pod 시작
+
+    state InitContainers {
+        [*] --> RegularInit: 일반 Init Container
+        RegularInit --> NativeSidecar: 완료 후
+        NativeSidecar --> StartupProbe: restartPolicy: Always
+        StartupProbe --> Ready: Probe 성공
+    }
+
+    InitContainers --> MainContainers: Sidecar 준비 완료
+
+    state MainContainers {
+        [*] --> Running: 메인 시작
+        Running --> WorkDone: 작업 완료
+    }
+
+    MainContainers --> Terminating: Exit 0
+
+    state Terminating {
+        [*] --> StopMain: 메인 종료
+        StopMain --> StopSidecar: Native Sidecar 자동 종료
+        StopSidecar --> [*]
+    }
+
+    Terminating --> [*]: Pod Completed
