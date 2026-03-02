@@ -1,0 +1,45 @@
+# 빌드된 이미지 검증용 Deployment + Service
+# 내장 레지스트리에서 Kaniko로 빌드된 이미지를 pull하여 실행
+# HTTP 응답으로 "Built inside Kubernetes!" 확인 가능
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imagebuilder-verify
+  labels:
+    app: imagebuilder-verify
+    pattern: ImageBuilder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: imagebuilder-verify
+  template:
+    metadata:
+      labels:
+        app: imagebuilder-verify
+    spec:
+      containers:
+      - name: web
+        image: registry.kube-system.svc.cluster.local/imagebuilder-test:kaniko
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+# 검증용 Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: imagebuilder-verify
+  labels:
+    app: imagebuilder-verify
+    pattern: ImageBuilder
+spec:
+  selector:
+    app: imagebuilder-verify
+  ports:
+  - port: 80
+    targetPort: 80
+  type: ClusterIP

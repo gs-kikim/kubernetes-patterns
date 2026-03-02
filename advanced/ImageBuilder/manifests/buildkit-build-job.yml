@@ -1,0 +1,62 @@
+# BuildKit 클라이언트 빌드 Job
+# buildkitd 데몬(Deployment)에 연결하여 빌드 요청 전송
+# 빌드 실행은 데몬이 수행하므로 클라이언트는 privileged 불필요
+# BUILDKIT_HOST 환경변수로 데몬 주소 지정
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: buildkit-client-build
+  labels:
+    app: buildkit-client-build
+    pattern: ImageBuilder
+    builder: buildkit-client
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: buildkit-client-build
+        pattern: ImageBuilder
+    spec:
+      restartPolicy: Never
+      initContainers:
+      - name: prepare-context
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          cp /configmap/Dockerfile /workspace/Dockerfile
+          cp /configmap/index.html /workspace/index.html
+          ls -la /workspace/
+        volumeMounts:
+        - name: build-context
+          mountPath: /configmap
+        - name: workspace
+          mountPath: /workspace
+      containers:
+      - name: buildctl
+        image: moby/buildkit:latest
+        env:
+        - name: BUILDKIT_HOST
+          value: "tcp://buildkitd:1234"
+        command:
+        - buildctl
+        args:
+        - "build"
+        - "--frontend=dockerfile.v0"
+        - "--local"
+        - "context=/workspace"
+        - "--local"
+        - "dockerfile=/workspace"
+        - "--output"
+        - "type=image,name=registry.kube-system.svc.cluster.local/imagebuilder-test:buildkit-daemon,push=true,registry.insecure=true"
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes:
+      - name: build-context
+        configMap:
+          name: build-context
+      - name: workspace
+        emptyDir: {}

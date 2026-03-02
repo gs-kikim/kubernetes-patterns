@@ -1,0 +1,23 @@
+# 빌드 컨텍스트를 ConfigMap으로 패키징
+# Kaniko와 BuildKit 모두 이 ConfigMap의 내용을 빌드 컨텍스트로 사용
+# hostPath 대신 ConfigMap 사용 — 모든 minikube 드라이버에서 작동
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: build-context
+  labels:
+    app: build-context
+    pattern: ImageBuilder
+data:
+  Dockerfile: |
+    FROM nginx:1.27-alpine
+    COPY index.html /usr/share/nginx/html/index.html
+    EXPOSE 80
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <body>
+    <h1>Built inside Kubernetes!</h1>
+    <p>ImageBuilder Pattern - k8spatterns</p>
+    </body>
+    </html>

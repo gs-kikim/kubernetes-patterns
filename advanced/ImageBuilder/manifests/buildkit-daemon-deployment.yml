@@ -1,0 +1,61 @@
+# BuildKit Daemon — 장기 실행 모드
+# 여러 빌드 클라이언트가 공유할 수 있는 BuildKit 데몬 Deployment + Service
+# buildctl 클라이언트가 tcp://buildkitd:1234 주소로 연결하여 빌드 요청 전송
+# 빌드 캐시가 데몬에 유지되어 반복 빌드 시 성능 향상
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buildkitd
+  labels:
+    app: buildkitd
+    pattern: ImageBuilder
+    role: build-daemon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: buildkitd
+  template:
+    metadata:
+      labels:
+        app: buildkitd
+        pattern: ImageBuilder
+    spec:
+      containers:
+      - name: buildkitd
+        image: moby/buildkit:latest
+        args:
+        - "--addr"
+        - "tcp://0.0.0.0:1234"
+        ports:
+        - containerPort: 1234
+          protocol: TCP
+        securityContext:
+          privileged: true
+        readinessProbe:
+          exec:
+            command:
+            - buildctl
+            - --addr
+            - tcp://127.0.0.1:1234
+            - debug
+            - workers
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+# BuildKit Daemon Service
+# 클러스터 내부에서 buildkitd:1234 주소로 빌드 API 접근 가능
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd
+  labels:
+    app: buildkitd
+    pattern: ImageBuilder
+spec:
+  selector:
+    app: buildkitd
+  ports:
+  - port: 1234
+    targetPort: 1234
+    protocol: TCP
